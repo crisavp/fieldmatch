@@ -57,14 +57,24 @@ def _data_root(cfg):
     return Path(cfg["roots"]["data_root"])
 
 
-def model_files(cfg, model):
-    """Sorted list of model files for a model spec (fail loud if none)."""
+def model_files(cfg, model, years=None):
+    """Sorted list of model files for a model spec (fail loud if none).
+
+    `years` (an iterable of ints) restricts to files whose name contains any of
+    those years -- used to load only the slice needed for a collocation run
+    instead of the whole multi-year archive.
+    """
     pattern = str(_data_root(cfg) / model["glob"])
     files = sorted(_glob.glob(pattern))
     if not files:
         raise FileNotFoundError(
             f"model '{model['label']}' matched no files: {pattern}"
         )
+    if years:
+        wanted = {str(y) for y in years}
+        scoped = [f for f in files if any(y in os.path.basename(f) for y in wanted)]
+        if scoped:
+            files = scoped
     return files
 
 

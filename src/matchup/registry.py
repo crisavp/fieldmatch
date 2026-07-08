@@ -55,9 +55,12 @@ def require_regions_match(sat, model):
         )
 
 
-def load_model_ds(cfg, model):
-    """Open + standardize a model dataset described by a model spec."""
-    files = model_files(cfg, model)
+def load_model_ds(cfg, model, years=None):
+    """Open + standardize a model dataset described by a model spec.
+
+    `years` restricts the opened files to that slice (see config.model_files).
+    """
+    files = model_files(cfg, model, years=years)
     ds = xr.open_mfdataset(
         files, combine="by_coords", parallel=True,
         chunks={model["chunks_dim"]: 24},
