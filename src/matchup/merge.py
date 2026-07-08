@@ -21,6 +21,7 @@ import glob
 import os
 
 import xarray as xr
+from joblib import Parallel, delayed
 
 from . import config as _cfg
 from . import ledger as _led
@@ -37,9 +38,13 @@ def _group_by_year(files):
     return {y: sorted(fs) for y, fs in groups.items()}
 
 
-def _stack_files(files, loader):
+def _stack_files(files, loader, n_jobs=-1):
     """Stack a list of colloc files into one flat time-indexed dataset (or None)."""
-    dsets = [loader(f) for f in files]
+    if len(files) > 200:
+        dsets = Parallel(n_jobs=n_jobs, prefer="threads")(
+            delayed(loader)(f) for f in files)
+    else:
+        dsets = [loader(f) for f in files]
     dsets = [d for d in dsets if d is not None and d.sizes.get("obs", 0) > 0]
     if not dsets:
         return None

@@ -130,14 +130,18 @@ def run_collocation(cfg, sat_name, model_name, n_jobs=-1, years=None):
     preprocess = kind_of(sat)["preprocess"]
     obs_kwargs = sat.get("obs_kwargs") or {}
 
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(process_file)(
-            f, outdir,
-            preprocess=preprocess, obs_kwargs=obs_kwargs, region_bbox=region_bbox,
-            ds_mod=ds_mod, uvar=model["uvar"], vvar=model["vvar"],
+    # Context-managed Parallel so the worker pool is torn down deterministically
+    # when the batch finishes -- otherwise loky can leave the process hanging on
+    # shutdown after all work is done (which blocks completion signalling).
+    with Parallel(n_jobs=n_jobs) as parallel:
+        results = parallel(
+            delayed(process_file)(
+                f, outdir,
+                preprocess=preprocess, obs_kwargs=obs_kwargs, region_bbox=region_bbox,
+                ds_mod=ds_mod, uvar=model["uvar"], vvar=model["vvar"],
+            )
+            for f in tqdm(todo, desc=f"collocate {sat_name} x {model_name}")
         )
-        for f in tqdm(todo, desc=f"collocate {sat_name} x {model_name}")
-    )
 
     # Record permanent-empties so they are never retried; 'nomodel' is left out on
     # purpose (it retries once the model download catches up).
