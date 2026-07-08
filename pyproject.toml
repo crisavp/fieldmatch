@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matchup"
+version = "0.1.0"
+description = "Config-driven satellite-model wind collocation (ASCAT/Sentinel-1 x model winds) producing wfetch-ready merged products"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "xarray",
+    "netcdf4",
+    "joblib",
+    "tqdm",
+    "pyyaml",
+    "typer",
+    "rich",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+matchup = "matchup.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]

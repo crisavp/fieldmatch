@@ -1,0 +1,133 @@
+# matchup configuration -- VALUES ONLY. No control flow lives here.
+#
+# All logic (dispatch by `kind`, region/grid guards, merge order) lives in the
+# matchup package. This file only declares WHERE data is and WHAT to call things.
+#
+# A model and a satellite source are paired for collocation; their `region` must
+# match (guarded in code -- a silent mismatch once cropped Med obs to the Red Sea
+# box and produced an all-NaN product).
+
+roots:
+  # New standard data root (region-partitioned). Absolute, or relative to repo root.
+  data_root: /home/valladca/WAVEWATCH/04_DATA/wind
+  # collocated products (per-file dirs + merged files + _parts) live here:
+  collocated_subdir: collocated
+
+# ---------------------------------------------------------------------------
+# Region crop boxes (satellite obs are cropped to these before interpolation).
+# ---------------------------------------------------------------------------
+regions:
+  redsea:   {lonmin: 32,  lonmax: 43,   latmin: 12, latmax: 30}
+  arabgulf: {lonmin: 48,  lonmax: 57,   latmin: 24, latmax: 30}   # TODO confirm limits
+  med:      {lonmin: -6,  lonmax: 36.5, latmin: 30, latmax: 48}
+
+# ---------------------------------------------------------------------------
+# Model wind datasets. `glob` is relative to roots.data_root (new IFS tree:
+# ifs_hres/{region}/{sfc|derived}/...). `label` becomes the naming stem for the
+# collocated dir + merged filename (case preserved for the dir, lowercased for
+# the merged file). `rename` maps original -> standard names; omit vars already
+# named right. uvar/vvar are the wind component names AFTER rename.
+# ---------------------------------------------------------------------------
+models:
+  IFS_HRES_neutral_redsea:
+    region: redsea
+    glob: ifs_hres/redsea/sfc/core/ifs_sfc_fc_*.nc
+    rename: {}
+    uvar: u10n
+    vvar: v10n
+    chunks_dim: time
+    label: IFS_HRES_neutral_redsea
+  IFS_HRES_redsea:
+    region: redsea
+    glob: ifs_hres/redsea/sfc/core/ifs_sfc_fc_*.nc
+    rename: {"10u": u10m, "10v": v10m}
+    uvar: u10m
+    vvar: v10m
+    chunks_dim: time
+    label: IFS_HRES_redsea
+  IFS_HRES_neutral_med:
+    region: med
+    glob: ifs_hres/med/sfc/core/ifs_sfc_fc_*.nc
+    rename: {}
+    uvar: u10n
+    vvar: v10n
+    chunks_dim: time
+    label: IFS_HRES_neutral_med
+  IFS_HRES_med:
+    region: med
+    glob: ifs_hres/med/sfc/core/ifs_sfc_fc_*.nc
+    rename: {"10u": u10m, "10v": v10m}
+    uvar: u10m
+    vvar: v10m
+    chunks_dim: time
+    label: IFS_HRES_med
+  IFS_HRES_neutral_arabgulf:
+    region: arabgulf
+    glob: ifs_hres/arabgulf/sfc/core/ifs_sfc_fc_*.nc
+    rename: {}
+    uvar: u10n
+    vvar: v10n
+    chunks_dim: time
+    label: IFS_HRES_neutral_arabgulf
+  IFS_HRES_stress_eq_redsea:
+    region: redsea
+    glob: ifs_hres/redsea/derived/stress_eq/ifs_u10s_*.nc
+    rename: {}
+    uvar: u10s
+    vvar: v10s
+    chunks_dim: time
+    label: IFS_HRES_stress_eq_redsea
+  IFS_HRES_corrected_redsea:
+    region: redsea
+    glob: ifs_hres/redsea/derived/corrected/ifs_fc_*_corrected.nc
+    rename: {"10u": u10m, "10v": v10m}
+    uvar: u10m
+    vvar: v10m
+    chunks_dim: time
+    label: IFS_HRES_corrected_redsea
+  ERA5_redsea:
+    region: redsea
+    glob: era5_wind_raw/ERA5vars_*.nc
+    rename: {valid_time: time, longitude: lon, latitude: lat, u10: u10m, v10: v10m}
+    uvar: u10m
+    vvar: v10m
+    chunks_dim: valid_time
+    label: ERA5_redsea
+
+# ---------------------------------------------------------------------------
+# Satellite sources. `kind` selects the preprocess/loader pair (code-side
+# dispatch in registry.KINDS). `raw_glob` is relative to roots.data_root.
+# outdir_prefix / merged_prefix are region-agnostic family tags (the region is
+# already carried by the model label), so the merged file lands as
+#   {merged_prefix}_{model_label.lower()}_merged_{Ystart}_{Yend}.nc
+# e.g. ASCAT_ifs_hres_neutral_med_merged_2016_2024.nc -- exactly what wfetch globs.
+# ---------------------------------------------------------------------------
+sat_sources:
+  ASCAT_redsea:
+    kind: ascat
+    region: redsea
+    raw_glob: ASCAT_raw/MetopABC_redsea/ascat_*.nc
+    outdir_prefix: ASCAT
+    merged_prefix: ASCAT
+    obs_kwargs: {obsLON360: true}
+  ASCAT_med:
+    kind: ascat
+    region: med
+    raw_glob: ASCAT_raw/MetopABC_med/ascat_*.nc
+    outdir_prefix: ASCAT
+    merged_prefix: ASCAT
+    obs_kwargs: {obsLON360: true}
+  ASCAT_arabgulf:
+    kind: ascat
+    region: arabgulf
+    raw_glob: ASCAT_raw/MetopABC_arabgulf/ascat_*.nc
+    outdir_prefix: ASCAT
+    merged_prefix: ASCAT
+    obs_kwargs: {obsLON360: true}
+  SENTINEL1_redsea:
+    kind: sentinel1
+    region: redsea
+    raw_glob: sentinel-1_raw/*.nc
+    outdir_prefix: SENT1
+    merged_prefix: sentinel1
+    obs_kwargs: {}
