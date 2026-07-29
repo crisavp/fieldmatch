@@ -1,0 +1,64 @@
+# Storm Harry, western/central Med, 16-22 Jan 2026.
+# Usage:
+#   matchup scan   config/campaigns/harry.yaml
+#   matchup match  config/campaigns/harry.yaml jason3 ecmwf_an
+#   matchup cstats config/campaigns/harry.yaml jason3 ecmwf_an
+campaign: harry
+data_root: /home/valladca/WAVEWATCH/harry_storm/data
+outdir: /home/valladca/WAVEWATCH/harry_storm/matchup_out
+
+region: {lonmin: -8, lonmax: 36, latmin: 26, latmax: 45}   # = ECMWF grib domain
+period: [2026-01-15, 2026-01-23]
+
+datasets:
+  # ── observations ─────────────────────────────────────────────────────────
+  # WAVE/ and WIND/ are NOT copies of each other: the CMEMS L3 files repeat
+  # (each already carries both VAVH and WIND_SPEED), but WIND/ holds extra
+  # CryoSat-2, Sentinel-3 and Sentinel-6 products. Glob both folders per
+  # instrument; matchup de-duplicates identical files by (name, size).
+  jason3:      {kind: altimeter_cmems, path: ["WAVE/JASON-3/*.nc",
+                                              "WIND/JASON-3/*.nc"]}
+  saral:       {kind: altimeter_cmems, path: ["WAVE/ALTIKA-SARAL/*.nc",
+                                              "WIND/ALTIKA-SARAL/*.nc",
+                                              "WIND/SENTINEL-3/global_vavh_l3_rt_al_*.nc"]}
+  cryosat2:    {kind: altimeter_cmems, path: ["WAVE/CRYOSAT-2/*.nc",
+                                              "WIND/CRYOSAT-2/*.nc"]}
+  hy2b:        {kind: altimeter_cmems, path: ["WAVE/HY-2B CMEMS/*.nc",
+                                              "WIND/HY-2B CMEMS/*.nc"]}
+  hy2c:        {kind: altimeter_cmems, path: ["WAVE/HY-2C CMEMS/*.nc",
+                                              "WIND/HY-2C CMEMS/*.nc"]}
+  swot:        {kind: altimeter_cmems, path: ["WAVE/SWOT-Nadir/*.nc",
+                                              "WIND/SWOT-Nadir/*.nc"]}
+  s3:          {kind: altimeter_s3,    path: ["WAVE/SENTINEL-3/**/*_RED_*.nc",
+                                              "WIND/SENTINEL-3/**/*_RED_*.nc"]}
+  s6:          {kind: altimeter_s6,    path: ["WAVE/SENTINEL-6A/**/*_RED_*.nc",
+                                              "WIND/SENTINEL-6/**/*_RED_*.nc"]}
+  s1_sar:      {kind: sentinel1,       path: "WIND/SAR/**/*-ocn-*.nc"}
+  # buoys: position is NOT in the CSV (from Mappa_ROCA.pdf via L. Cavaleri).
+  buoy_ba04:   {kind: buoy_ispra, path: "buoys/ba04_*.csv",
+                lat: 38.5, lon: 9.0}       # W of Sardinia
+  buoy_ba08:   {kind: buoy_ispra, path: "buoys/ba08_*.csv",
+                lat: 36.0764, lon: 15.4018}  # SE of Sicily
+
+  # ── models (data_Jean, ECMWF grib) ───────────────────────────────────────
+  ecmwf_an:    {kind: grib, path: "models/analysis/*.grib"}
+  ecmwf_hind:  {kind: grib, path: "models/hindcast/*.grib"}
+  era5:        {kind: grib, path: "models/ERA5/*.grib"}
+  # per-init forecasts: one dataset per init keeps the semantics obvious
+  fc_20260118: {kind: grib, path: "models/forecast/forecast_20260118_0_*.grib"}
+  fc_20260119: {kind: grib, path: "models/forecast/forecast_20260119_0_*.grib"}
+  fc_20260120: {kind: grib, path: "models/forecast/forecast_20260120_0_*.grib"}
+  # AIFS holds many inits in one file: pick one with `init`
+  aifs_wave:   {kind: grib, path: "models/AI/aifs_j0b1_wave_parameters_*.grib",
+                init: "2026-01-18T00"}
+  aifs_wind:   {kind: grib, path: "models/AI/aifs_j0b1_surface_winds_*.grib",
+                init: "2026-01-18T00"}
+  # All forecast inits in one dataset: use `matchup match ... --lead <hours>`
+  # to take a constant-lead slice across them (forecast verification view).
+  forecasts:   {kind: grib, path: "models/forecast/forecast_*.grib"}
+  # All AIFS inits; same --lead treatment (or `init:` to follow one forecast)
+  aifs_all:    {kind: grib, path: "models/AI/aifs_j0b1_wave_parameters_*.grib"}
+  # 00 UTC inits only -- the init hour is in the filename (_0_ vs _1200_).
+  # Use with a lead window: `match ... --lead 12-35` = forecast day 1, which
+  # tiles the timeline exactly when inits are daily.
+  forecasts_00z: {kind: grib, path: "models/forecast/forecast_*_0_*.grib"}

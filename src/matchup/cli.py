@@ -9,6 +9,7 @@ Usage:
     matchup subset merged.nc --lonmin 2 --lonmax 20 --latmin 36 --latmax 44 \
                    --t0 2023-11-01 --t1 2023-11-10 --out storm.nc
 """
+import datetime as _dt
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,14 @@ import typer
 from rich import print as rprint
 
 from . import config as _cfg
+
+
+def _version():
+    try:
+        from importlib.metadata import version
+        return version("matchup")
+    except Exception:
+        return "unknown"
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
                   help="Config-driven satellite/model wind collocation "
@@ -127,6 +136,205 @@ def run(data: str = _DATA, model: str = _MODEL,
     run_collocation(cfg, data, model, n_jobs=jobs, years=_parse_years(years))
     res = run_merge(cfg, data, model, prune=prune, drop_colloc=drop_colloc)
     rprint(f"[green]merged ->[/green] {res['merged']}")
+
+
+@app.command()
+def doctor():
+    """Verify the installation: dependencies, netCDF and GRIB engines, package."""
+    from .doctor import run_doctor
+    rprint("[bold]matchup doctor[/bold]")
+    if not run_doctor():
+        raise typer.Exit(1)
+    rprint("[green]all checks passed[/green]")
+
+
+# ── campaign workflow (scan / match / cstats) ──────────────────────────────
+@app.command()
+def scan(campaign: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                         help="Campaign YAML (see config/campaigns/).")):
+    """Inventory a campaign: files found, readable, obs in box, time coverage."""
+    from .campaign import load_campaign
+    from .scan import format_report, scan_campaign
+    camp = load_campaign(campaign)
+    rprint(format_report(camp, scan_campaign(camp)))
+
+
+def _load_pair(campaign, obs_name, model_name):
+    from .campaign import MODEL_KINDS, load_campaign
+    camp = load_campaign(campaign)
+    od, md = camp.get(obs_name), camp.get(model_name)
+    if od.role != "obs" or md.role != "model":
+        raise typer.BadParameter(
+            f"need <obs> <model>; got {obs_name}={od.role}, {model_name}={md.role}")
+    return camp, od, md, MODEL_KINDS[md.kind]
+
+
+@app.command()
+def match(campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
+          obs: str = typer.Argument(..., help="Obs dataset name in the campaign."),
+          model: str = typer.Argument(..., help="Model dataset name in the campaign."),
+          tol_minutes: Optional[float] = typer.Option(
+              None, help="Max |obs-model| time gap in minutes (default: 30, "
+                         "independent of the model timestep -- observations "
+                         "are instantaneous). Widen for coarse-output models."),
+          lead: Optional[str] = typer.Option(
+              None, help="Forecast lead window in hours across every init: "
+                         "'24' (single lead) or '12-35' (e.g. forecast day 1 "
+                         "from daily 00 UTC runs)."),
+          lead_tol: float = typer.Option(
+              6.0, help="Tolerance (h) when no step falls inside the window."),
+          csv: bool = typer.Option(True, help="Also write a flat CSV.")):
+    """Collocate one obs dataset with one model dataset -> flat .nc (+ .csv)."""
+    import warnings
+
+    import numpy as np
+    import xarray as xr
+
+    from .campaign import combine_provenance, crop_obs
+    from .collocate_track import NoMatchInTime, collocate_track, write_pair
+    from .models import open_model
+    from .readers import read_obs
+
+    camp, od, md, engine = _load_pair(campaign, obs, model)
+    opts = dict(md.options)
+    if lead is not None:
+        opts.pop("init", None)          # --lead overrides a configured init
+        opts.update(lead=lead, lead_tol=lead_tol)
+    mod = open_model(md.paths, engine=engine, **opts)
+
+    clouds = []
+    for f in od.files():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ds = read_obs(od.kind, f, **od.options)
+        if ds is None:
+            continue
+        ds = crop_obs(ds, camp.bbox, camp.period)
+        if ds is not None:
+            clouds.append(ds)
+    if not clouds:
+        rprint(f"[red]no {obs} observations inside the campaign box/period[/red]")
+        raise typer.Exit(1)
+    # concat keeps only the first file's attrs: rebuild the record over all files
+    obs_prov = combine_provenance(clouds)
+    cloud = xr.concat(clouds, dim="obs").sortby("time")
+    cloud.attrs = obs_prov
+
+    tol = np.timedelta64(int(tol_minutes * 60), "s") if tol_minutes else None
+    try:
+        pair = collocate_track(cloud, mod, tol=tol)
+    except NoMatchInTime as e:
+        rprint(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    if pair is None:
+        rprint("[red]no usable model values for these observations[/red]")
+        raise typer.Exit(1)
+
+    # Full provenance travels with the data: obs side, model side, matching.
+    pair.attrs.update(obs_prov)
+    pair.attrs["obs_reader"] = pair.attrs.pop("reader", od.kind)
+    pair.attrs.update(
+        campaign=camp.name, obs_dataset=obs, model_dataset=model,
+        obs_files=len(od.files()), model_files=len(md.files()),
+        model_kind=md.kind,
+        region=(f"lon [{camp.bbox['lonmin']}, {camp.bbox['lonmax']}] "
+                f"lat [{camp.bbox['latmin']}, {camp.bbox['latmax']}]"),
+        period=f"{camp.period[0]} .. {camp.period[1]}",
+        created=_dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        matchup_version=_version(),
+    )
+    if lead is not None:
+        pair.attrs["lead_window_hours"] = lead
+
+    camp.outdir.mkdir(parents=True, exist_ok=True)
+    suffix = ""
+    if lead is not None:
+        from .models import parse_lead
+        lo, hi = parse_lead(lead)
+        suffix = (f"_lead{int(lo):03d}h" if lo == hi
+                  else f"_lead{int(lo):03d}-{int(hi):03d}h")
+    stem = camp.outdir / f"{camp.name}_{obs}_x_{model}{suffix}"
+    write_pair(pair, f"{stem}.nc", f"{stem}.csv" if csv else None)
+    rprint(f"[green]{pair.sizes['obs']} collocated obs ->[/green] {stem}.nc"
+           + (f" + {stem}.csv" if csv else ""))
+    tolm = pair.attrs.get("time_tolerance_minutes", 30)
+    nrej = pair.attrs.get("n_rejected_time", 0)
+    if nrej:
+        rprint(f"  [yellow]{nrej} obs rejected: no model step within "
+               f"{tolm:.0f} min[/yellow] (widen with --tol-minutes)")
+    # A variable can be empty while the row survives on another variable --
+    # say so, or an all-NaN column looks like missing data rather than a
+    # cadence mismatch.
+    for item in pair.attrs.get("matched_per_variable", "").split("; "):
+        if item.startswith(tuple(f"{v}: 0/" for v in pair.data_vars)):
+            rprint(f"  [yellow]{item} -- no pairs at {tolm:.0f} min "
+                   f"tolerance[/yellow]")
+    if "lead_hours" in pair:
+        lh = pair["lead_hours"].values
+        spread = np.nanmax(lh) - np.nanmin(lh)
+        msg = f"  lead times: {np.nanmin(lh):.0f}-{np.nanmax(lh):.0f} h"
+        if spread > 1 and lead is None:
+            # Leads vary because a single init was followed across its whole
+            # run -- pooling those is not a forecast skill number.
+            msg += ("  [yellow](one init, mixed leads -- use --lead for a "
+                    "verification sample, or `cstats --by-lead`)[/yellow]")
+        rprint(msg)
+
+
+@app.command()
+def cstats(campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
+           obs: str = typer.Argument(...),
+           model: str = typer.Argument(...),
+           by_lead: bool = typer.Option(
+               False, "--by-lead",
+               help="Group statistics by forecast lead time instead of pooling "
+                    "them (forecast datasets only)."),
+           lead_bin: float = typer.Option(24.0, help="--by-lead bin width in hours."),
+           suffix: str = typer.Option("", help="Filename suffix, e.g. _lead024h."),
+           plots: bool = typer.Option(True, help="Write scatter+map PNG per variable.")):
+    """Stats table (bias/RMSE/SI/corr) for a collocated pair (after `match`)."""
+    import numpy as np
+    import xarray as xr
+
+    from .campaign import load_campaign
+    from .pairstats import format_stats, plot_pair, stats_table
+    camp = load_campaign(campaign)
+    stem = camp.outdir / f"{camp.name}_{obs}_x_{model}{suffix}"
+    nc = Path(f"{stem}.nc")
+    if not nc.exists():
+        rprint(f"[red]{nc} not found -- run `matchup match` first[/red]")
+        raise typer.Exit(1)
+    ds = xr.open_dataset(nc)
+    rprint(f"[bold]{camp.name}: {obs} x {model}[/bold]")
+
+    if by_lead:
+        if "lead_hours" not in ds:
+            rprint("[red]no lead_hours column -- not a forecast collocation[/red]")
+            raise typer.Exit(1)
+        lh = ds["lead_hours"].values
+        edges = np.arange(0, np.nanmax(lh) + lead_bin, lead_bin)
+        for lo in edges:
+            sel = np.flatnonzero((lh >= lo) & (lh < lo + lead_bin))
+            if sel.size == 0:
+                continue
+            rprint(f"\n[bold]lead {lo:.0f}-{lo + lead_bin:.0f} h[/bold]  "
+                   f"({sel.size} obs)")
+            print(format_stats(stats_table(ds.isel(obs=sel))))
+        return
+
+    table = stats_table(ds)
+    if "lead_hours" in ds:
+        lh = ds["lead_hours"].values
+        if np.nanmax(lh) - np.nanmin(lh) > 1:
+            rprint(f"[yellow]warning: pooling lead times "
+                   f"{np.nanmin(lh):.0f}-{np.nanmax(lh):.0f} h into one number; "
+                   f"use --by-lead[/yellow]")
+    print(format_stats(table))
+    if plots:
+        for v in table:
+            png = f"{stem}_{v}.png"
+            plot_pair(ds, v, png, title=f"{obs} x {model}")
+            rprint(f"  plot -> {png}")
 
 
 @app.command()
