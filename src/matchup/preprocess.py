@@ -15,6 +15,13 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .readers import s1_good_quality_values
+
+
+def _good_quality(ds, var):
+    """Quality-flag values to keep, from the file's own flag_meanings."""
+    return s1_good_quality_values(ds[var])
+
 
 def ASCAT_preprocess(file, user_region=None, user_coords=None, obsLON360=True):
     """Preprocess one ASCAT L2 file: fix longitude, normalize time, crop to region.
@@ -141,17 +148,25 @@ def load_and_stack_ascat(filepath):
 
 
 def load_and_stack_sentinel(filepath):
-    """Open one collocated Sentinel-1 file and stack its spatial dims into `obs`."""
+    """Open one collocated Sentinel-1 file and stack its spatial dims into `obs`.
+
+    Quality filtering is IPF-version aware (see readers.s1_good_quality_values):
+    the meaning of owiWindQuality == 0 flipped from 'good' to 'no_data' at IPF
+    004.02, so the value to keep is read from flag_meanings rather than
+    hardcoded. On the legacy archive (IPF 003.31, flag_meanings
+    'good medium low poor') this resolves to {0} -- byte-identical to the
+    previous behaviour.
+    """
     try:
         with xr.open_dataset(filepath) as ds:
+            good = _good_quality(ds, 'wind_quality')
+            keep = ds['wind_quality'].isin(good) & ds['wind_speed'].notnull()
             if 'time' in ds.dims and 'NUMROWS' in ds.dims and 'NUMCELLS' in ds.dims:
-                ds = ds.stack(obs=('time', 'NUMROWS', 'NUMCELLS'))
-                ds = ds.where((ds['wind_quality'] == 0) & (ds['wind_speed'].notnull()), drop=True)
-                return ds
+                return ds.stack(obs=('time', 'NUMROWS', 'NUMCELLS')).where(
+                    keep.stack(obs=('time', 'NUMROWS', 'NUMCELLS')), drop=True)
             elif 'time' in ds.dims and 'NUMCELLS' in ds.dims:
-                ds = ds.stack(obs=('time', 'NUMCELLS'))
-                ds = ds.where((ds['wind_quality'] == 0) & (ds['wind_speed'].notnull()), drop=True)
-                return ds
+                return ds.stack(obs=('time', 'NUMCELLS')).where(
+                    keep.stack(obs=('time', 'NUMCELLS')), drop=True)
             else:
                 return ds
     except Exception as e:
