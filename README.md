@@ -54,14 +54,30 @@ matchup match  config/campaigns/harry.yaml jason3 ecmwf_an   # collocate -> .nc 
 matchup cstats config/campaigns/harry.yaml jason3 ecmwf_an   # stats table + plots
 ```
 
-- **`scan`** — per dataset: files found, files readable, observations inside
-  the box/period, time coverage, variables; and loudly, anything unreadable.
-  Run it first on every new data delivery.
+- **`scan`** — per dataset: files found/readable, observations inside the
+  box/period, per-variable model cadence and the tolerance derived from it,
+  rejection counts, which variables carry no quality flag, and loudly, anything
+  unreadable. Run it first on every new data delivery.
 - **`match`** — reads all files of an obs dataset, crops to the campaign
   box/period, collocates against the model cube, writes
-  `<outdir>/<campaign>_<obs>_x_<model>.nc` **and `.csv`**.
-- **`cstats`** — bias / RMSE / SI / correlation / symmetric slope per variable,
-  plus a scatter + difference-map PNG (`--no-plots` to skip).
+  `<outdir>/<campaign>_<obs>_x_<model>.nc` **and `.csv`**. Exits non-zero when
+  nothing matches, so scripts must check (`match ... && cstats ...`) or they
+  will read a stale output.
+- **`cstats`** — bias / RMSE / SI / correlation / symmetric slope per variable
+  (circular statistics for directions), plus scatter + difference-map PNGs.
+  `--by-lead` splits a forecast collocation into lead bands.
+
+Forecast verification: `match --lead 12-35` takes a lead **window** across
+every init in the dataset (a single lead, `--lead 24`, is the degenerate case
+but inherits the init spacing in its time tolerance — prefer a window). Filter
+inits by hour through the glob. Each output row records `init` and
+`lead_hours`.
+
+Defaults worth knowing: time tolerance is a strict **30 min** independent of
+the model timestep (observations are instantaneous); altimeter records within
+**30 km of the coast** are dropped where the product supports it. Both are
+recorded in every output alongside `<var>_source` / `<var>_filter` /
+`n_rejected_*`, so results are auditable without rerunning.
 
 ## Campaign file
 

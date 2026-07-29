@@ -125,11 +125,16 @@ Rules of thumb:
 | `grib` | any ECMWF GRIB — analysis, hindcast, ERA5, forecasts, AIFS |
 | `netcdf` | model output in netCDF |
 
-Two options for awkward model files:
+Options for awkward files:
 
 - `init: "2026-01-18T00"` — when one file holds **many forecast starts**
-  (AIFS), pick which start to use.
+  (AIFS), pick which start to use. See §5 for the alternative, `--lead`.
 - `rename: {my_var: hs}` — if your variable names differ from the standard.
+- `min_dist_coast_km: 50` — how far from the coast an altimeter record must be
+  (default 30; set `0` to keep everything). Only S3/S6 carry the necessary
+  variable.
+- `open_ocean_only: false` — keep enclosed seas and lakes, which are excluded
+  by default.
 
 Standard names used throughout: `hs` (significant wave height), `wind_speed`,
 `wind_dir` (direction the wind comes **from**, degrees), `mwd`, `mwp`, `tp`.
@@ -141,19 +146,46 @@ matchup scan my_campaign.yaml
 ```
 
 ```
-campaign harry: lon [-8, 36] lat [26, 45]  2026-01-15T00:00 -> 2026-01-23T00:00
-  jason3       OBS    2/2 files readable  vars=hs,hs_unfiltered,wind_speed  440/14032 obs in box, 2026-01-19T07:01 -> 2026-01-19T23:23
-  buoy_ba04    OBS    1/1 files readable  vars=hmax,hs,tm01,tm02,tp,wave_dir  335/529 obs in box, ...
-  ecmwf_an     MODEL  8 files  vars=dwi,hs,mwd,mwp,pp1d,u10,v10,wind,wind_dir,wind_speed  grid 191x441 lat[26.0,45.0] lon[-8.0,36.0]  192 steps ...
+campaign: harry
+  region : lon [-8, 36]  lat [26, 45]
+  period : 2026-01-15T00:00 -> 2026-01-23T00:00
+
+jason3  [OBS]  2/2 file(s) readable
+  in box   : 440 of 14032 obs
+  time     : 2026-01-19T07:01 -> 2026-01-19T23:23
+  variables: hs, hs_unfiltered, wind_speed
+  rejected : none  (of 14032 read)
+  land mask: none (CMEMS L3 carries no dist_coast or surface type; upstream
+             editing only)
+  UNFILTERED: hs, wind_speed (no quality flag in this product)
+
+s3  [OBS]  5/5 file(s) readable
+  in box   : 551 of 6779 obs
+  rejected : 1271 coastal/land  (of 8050 read)
+  land mask: dist_coast_01 >= 30 km and surf_type_01 in [0]
+
+ecmwf_an  [MODEL]  8 file(s)
+  grid     : 191 x 441  lat [26.00, 45.00]  lon [-8.00, 36.00]
+  time     : 192 steps  2026-01-15T00:00 -> 2026-01-22T23:00
+  variables:
+    every 1h    ( 192 steps, tol 30min) : dwi, hs, mwd, mwp, pp1d, wind
+    every 6h    (  32 steps, tol 3h   ) : u10, v10, wind_dir, wind_speed
 ```
 
-**Always run this first.** It tells you what was found, what was readable, how
-many measurements actually fall inside your box and period, and — importantly —
-names any file it could **not** read. If a comparison later looks empty, the
-answer is almost always visible here.
+**Always run this first.** If a comparison later looks empty, the answer is
+almost always visible here. What to read:
 
-`440/27384 obs in box` is normal: satellite files are global, and only the part
-crossing your region counts.
+- `440 of 14032 obs` — normal. Satellite files are global; only the part
+  crossing your region counts.
+- **`every 1h` / `every 6h`** — variables in the same model file often have
+  different output frequencies. Here the waves are hourly but the winds are
+  6-hourly, which limits what the winds can be compared against (see §4).
+- `rejected` / `land mask` — what the reader discarded before you saw it.
+  Altimeter records within 30 km of the coast are dropped by default, because
+  land inside the radar footprint corrupts the retrieval.
+- **`UNFILTERED`** — variables for which this product ships no quality flag,
+  so none was applied. Worth knowing before you trust a scatter plot.
+- Any file that could **not** be read is named explicitly.
 
 ## 4. Compare
 
@@ -215,18 +247,113 @@ because values are then compared across a 3-hour gap) or use a measurement
 that samples the model's output times — buoys report every 30 min, so they
 always have a point at the model's hours.
 
-## 5. Repeat for every combination
+## 5. Verifying forecasts (by lead time)
+
+A forecast archive is a grid: one row per initialisation, one column per lead
+time. Which way you slice it decides what the statistics mean.
+
+```
+              lead:   0h    12h    24h    36h    48h ...
+init 18 Jan 00 →     18/00  18/12  19/00  19/12  20/00     ← one forecast run
+init 18 Jan 12 →     18/12  19/00  19/12  20/00  20/12
+init 19 Jan 00 →     19/00  19/12  20/00  20/12  21/00
+                            ↑
+                     constant lead: one column, many runs
+```
+
+**To follow one forecast run**, name its init in the campaign file:
+
+```yaml
+  fc_18jan: {kind: grib, path: "models/forecast/forecast_20260118_0_*.grib"}
+```
+
+Useful for looking at a single forecast, but *not* a skill number: a satellite
+pass then lands at whatever lead happens to match its time.
+
+**To measure forecast skill**, take a lead window across every run. Point one
+dataset at all the inits and use `--lead`:
+
+```yaml
+  forecasts_00z: {kind: grib, path: "models/forecast/forecast_*_0_*.grib"}
+```
+
+```bash
+matchup match my_campaign.yaml jason3 forecasts_00z --lead 12-35   # forecast day 1
+matchup match my_campaign.yaml jason3 forecasts_00z --lead 36-59   # day 2
+matchup match my_campaign.yaml jason3 forecasts_00z --lead 60-83   # day 3
+```
+
+`--lead 12-35` means "every field between +12 h and +35 h, from whichever run
+provides it". With daily runs those 24 hours tile the timeline exactly: each
+valid time is covered by one run, no gaps, no double counting. That is the
+standard "forecast day 1" construct. `--lead 24` (a single number) also works,
+but prefer a window: a single lead inherits the *init* spacing, so with
+12-hourly runs its time matching loosens to ±6 h, which is enough to distort a
+bias. A day window gives hourly valid times and ±30 min.
+
+Results land in separate files (`..._lead012-035h.nc`), and every row records
+which run produced it:
+
+```
+time,lat,lon,hs,model_hs,dt,init,lead_hours
+2026-01-19 07:01:48,44.1993,9.2687,1.0060,0.8200,108.0,2026-01-18 00:00:00,31.0
+```
+
+`cstats` reads them with `--suffix`, or splits one file into lead bands:
+
+```bash
+matchup cstats my_campaign.yaml jason3 forecasts_00z --suffix _lead012-035h
+matchup cstats my_campaign.yaml jason3 fc_18jan --by-lead --lead-bin 12
+```
+
+If a window is wider than the gap between runs, several runs cover the same
+valid time; the freshest (shortest lead) wins and you get a warning that the
+sample is no longer a clean tiling.
+
+Some model files hold many inits at once (AIFS does). Those must be told which
+to use — `matchup scan` flags them with a note rather than an error.
+
+## 6. Repeat for every combination
 
 Any measurement against any model — the names are all you change:
 
 ```bash
 for obs in jason3 saral s3 buoy_ba04 buoy_ba08; do
-  for mod in ecmwf_an era5 aifs_wave; do
-    matchup match  my_campaign.yaml $obs $mod
+  for mod in ecmwf_an era5; do
+    matchup match  my_campaign.yaml $obs $mod && \
     matchup cstats my_campaign.yaml $obs $mod --no-plots
   done
 done
 ```
+
+Note the `&&`: `match` exits with an error when nothing could be matched, and
+`cstats` would otherwise print the statistics of a **previous** run's file.
+
+## 7. What was actually done to your data
+
+Every output records its own provenance, so a result can be audited months
+later without rerunning anything:
+
+```bash
+ncdump -h harry_s3_x_ecmwf_an.nc | grep :
+```
+
+```
+  obs_reader             = "altimeter_s3"
+  hs_source              = "swh_ocean_01_ku (SAR mode, Ku; not _plrm_)"
+  hs_filter              = "none (swh_ocean_qual_01_ku not present in this product)"
+  land_mask              = "dist_coast_01 >= 30 km and surf_type_01 in [0]"
+  n_read                 = 8050
+  n_rejected_coastal     = 1271
+  time_tolerance_minutes = 30.0
+  matched_per_variable   = "hs: 551/551 within tol (model every 1h); ..."
+  campaign = "harry" ; obs_dataset = "s3" ; model_dataset = "ecmwf_an"
+  created = "2026-07-29T21:22:35+03:00" ; matchup_version = "0.1.0"
+```
+
+If two files in one dataset were processed differently — a delivery mixing two
+satellite processor versions, say — the attribute reads `MIXED: a | b` instead
+of quietly reporting one of them.
 
 ---
 
