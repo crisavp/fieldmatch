@@ -1,7 +1,32 @@
 # matchup — outstanding tasks
 
 Ordered by priority. Context for each is in the git history / conversation of
-2026-07-27..28.
+2026-07-27..30.
+
+## Design principle — dropping must stay reversible
+
+The library exists to make collocating many files easy, and it earns the clean
+comparisons by discarding a great deal: rows outside the box, the coastal
+strip, quality-flagged values, and — most of all — every source variable
+outside each reader's small standard map (Sentinel-3 alone ships 62 variables
+at 1 Hz; we keep three).
+
+That is right for the default path and wrong as a hard limit. The intended
+user is an advanced one who will legitimately want quantities that are NOT
+directly comparable to a model field: retracker diagnostics, `sig0`, rain and
+ice flags, wave periods, spectral partitions. **No decision in this library may
+make those unreachable.** Concretely:
+
+- keep the escape hatch (item 13, `extra_vars: [...]`) on the roadmap and
+  treat it as a design requirement, not a nicety;
+- prefer masking to deleting where the choice is a judgement call, and where a
+  reader does drop rows (coastal masking) make the threshold configurable and
+  record what was dropped — `min_dist_coast_km: 0` must always recover the
+  full track;
+- never let a standard name silently replace access to its source variable:
+  the provenance attributes name the source, so the raw file can be reopened;
+- the canonical cloud is a floor, not a ceiling — a reader may carry extra
+  columns through, and collocation simply ignores what the model cannot match.
 
 ## Must — data correctness (results are wrong or incomplete until these land)
 
@@ -80,10 +105,19 @@ Ordered by priority. Context for each is in the git history / conversation of
    lead wins and a warning says the sample is no longer a clean tiling.
    With daily inits, +12–35 h tiles the timeline exactly and warns nothing.
 
-6. **Characterization test for the archive pipeline before any refactor.**
-   Collocate ~3 known ASCAT files, save the output, assert byte/statistical
-   equality afterwards. Required because `wfetch` consumes the merged product
-   by exact filename glob — no test, no safe refactor.
+6. ~~Characterization test for the archive pipeline before any refactor.~~
+   **DONE 2026-07-30.** `tests/test_archive_characterization.py` freezes the
+   ASCAT path end to end — preprocess (0-360 longitude conversion, per-row time
+   becoming the row dimension, empty-region skip), collocation (interpolation
+   onto obs, idempotent re-run, `nomodel` retryable without writing), the
+   merge-stage loader (quality filter, the +180 direction rotation that lives
+   in the LOADER and is easy to double-apply), and the `wfetch` consumer
+   contract (flat monotonic time index, REQUIRED variables present).
+
+   Synthetic and hand-checkable (a 2x3 granule on a 3x3 uniform model grid),
+   so it needs no external data and runs in milliseconds. Verified by mutation:
+   removing the direction rotation, skipping the longitude conversion, and
+   loosening the quality threshold each make it fail. Item 10 is now unblocked.
 
 ## Must — transparency (Q8, tier 1: make choices visible before configurable)
 
@@ -147,6 +181,11 @@ Ordered by priority. Context for each is in the git history / conversation of
     variables through unstandardized, so "I need one more field" never
     requires editing `readers.py`. Cheap; keeps matchup out of the business of
     standardizing all 401 S3 variables.
+    **Promote this**: it is the mechanism behind the design principle at the
+    top of this file, not a convenience. An advanced user who wants `sig0`,
+    a rain flag, a wave period or a retracker diagnostic should get it from
+    the campaign file, and those columns should ride through collocation into
+    the CSV untouched even though no model field matches them.
 
 ## Blocked — fresh-environment install is unverified (2026-07-30)
 
