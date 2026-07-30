@@ -148,6 +148,43 @@ Ordered by priority. Context for each is in the git history / conversation of
     requires editing `readers.py`. Cheap; keeps matchup out of the business of
     standardizing all 401 S3 variables.
 
+## Blocked — fresh-environment install is unverified (2026-07-30)
+
+`./install.sh` has **never been run to completion**, on this machine only,
+because of a machine-level fault unrelated to matchup. Do this after the next
+reboot; it is the first thing a colleague will run.
+
+```bash
+rm -rf ~/anaconda3/envs/matchup-testinstall ~/anaconda3/envs/matchup-verify
+cd ~/WAVEWATCH/matchup && ./install.sh          # expect 5-15 min
+```
+
+**What happens instead.** Three separate runs wedged identically: the conda
+process enters uninterruptible sleep (`D`), `wchan=lookup_slow`, 0 % CPU, with
+`write_bytes` frozen and the environment stuck at exactly 100 MB. The first
+sat like that for 40 h. `D`-state processes ignore SIGKILL, so they survive
+until reboot; two are still parked plus their partial env directories (inert,
+not registered with conda, harmless).
+
+**Ruled out**: the solver (libmamba is default; the solve takes seconds with
+the explicit `--solver=libmamba` flag), the downloads (they complete), the disk
+(125 MB/s to the same filesystem), the sshfs mounts to KAUST (`/mnt/shaheen`,
+`/mnt/project/k10036` both respond), and conda's own config (`pkgs_dirs` and
+`envs_dirs` are all local). `df` on the anaconda path also hangs, which points
+below conda entirely -- a wedged kernel/FUSE or ext4 path-lookup state on
+`/dev/sdc1`.
+
+**If it stalls again after a reboot** it is the machine, not matchup: check
+`dmesg | grep -iE 'ext4|I/O error'` (needs root) and raise it with whoever
+administers the box.
+
+Note that the *library* is not in doubt: 21 tests pass and every command has
+been run end-to-end against the real Harry data in the `wave-models2`
+environment. Only the fresh-environment bootstrap is unverified. The timeout
+added in `install.sh` (`MATCHUP_CONDA_TIMEOUT`, default 3600 s) means this
+failure now reports "conda exceeded 3600s and was stopped" with a retry hint
+rather than appearing to hang overnight.
+
 ## Nice to have
 
 14. Model × model intercomparison verb (`matchup compare era5 aifs --var hs`):
