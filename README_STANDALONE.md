@@ -125,19 +125,27 @@ Rules of thumb:
 | `grib` | any ECMWF GRIB — analysis, hindcast, ERA5, forecasts, AIFS |
 | `netcdf` | model output in netCDF |
 
-Options for awkward files:
-
-- `init: "2026-01-18T00"` — when one file holds **many forecast starts**
-  (AIFS), pick which start to use. See §5 for the alternative, `--lead`.
-- `rename: {my_var: hs}` — if your variable names differ from the standard.
-- `min_dist_coast_km: 50` — how far from the coast an altimeter record must be
-  (default 30; set `0` to keep everything). Only S3/S6 carry the necessary
-  variable.
-- `open_ocean_only: false` — keep enclosed seas and lakes, which are excluded
-  by default.
-
 Standard names used throughout: `hs` (significant wave height), `wind_speed`,
 `wind_dir` (direction the wind comes **from**, degrees), `mwd`, `mwp`, `tp`.
+
+### Dataset options
+
+All optional; add them beside `kind` and `path`.
+
+| option | what it does |
+|---|---|
+| `extra_vars: [a, b]` | also read these raw variables — see §4 |
+| `retracker: plrm` | S3: use pseudo-LRM instead of SAR mode (`sar`, `plrm`) |
+| `retracker: nr` | S6: numerical ocean retracker instead of MLE (`mle`, `nr`) |
+| `band: c` | S6: C band instead of Ku (`ku`, `c`) |
+| `min_dist_coast_km: 50` | how far offshore an altimeter record must be (default 30; `0` keeps everything). S3/S6 only |
+| `open_ocean_only: false` | keep enclosed seas and lakes, excluded by default |
+| `qc: false` | Sentinel-1: skip the quality/land masking |
+| `lat:` / `lon:` | buoys: the position, which the CSV does not contain |
+| `init: "2026-01-18T00"` | models: which forecast start to use — see §6 |
+| `rename: {my_var: hs}` | models: if your variable names differ from the standard |
+
+A wrong value is rejected with the list of valid ones, so guessing is safe.
 
 ## 3. Look at what you have
 
@@ -179,7 +187,7 @@ almost always visible here. What to read:
   crossing your region counts.
 - **`every 1h` / `every 6h`** — variables in the same model file often have
   different output frequencies. Here the waves are hourly but the winds are
-  6-hourly, which limits what the winds can be compared against (see §4).
+  6-hourly, which limits what the winds can be compared against (see §5).
 - `rejected` / `land mask` — what the reader discarded before you saw it.
   Altimeter records within 30 km of the coast are dropped by default, because
   land inside the radar footprint corrupts the retrieval.
@@ -187,7 +195,67 @@ almost always visible here. What to read:
   so none was applied. Worth knowing before you trust a scatter plot.
 - Any file that could **not** be read is named explicitly.
 
-## 4. Compare
+## 4. See what is inside the files
+
+By default each product is read for a handful of variables — a Sentinel-3 file
+holds 65 and three are used. To see the rest:
+
+```bash
+matchup vars my_campaign.yaml s3
+```
+
+```
+s3  [altimeter_s3]  5 file(s)
+  sample : S3A_SR_2_WAT_RED__NT_135_300_20260121T091006_..._G62.nc
+  records lie on: time_01
+
+  variables on ('time_01',)  (65)
+    swh_ocean_01_ku              -> hs         m significant waveheight : 1 Hz Ku
+    wind_speed_alt_01_ku         -> wind_speed m/s Altimeter wind speed : 1 Hz Ku
+    dist_coast_01                extra_vars    m distance to the coast : 1 Hz
+    rain_flag_01_ku              extra_vars    Altimeter rain flag : 1 Hz Ku band
+      flags: no_rain rain high_rain_probability_from_altimeter ...
+```
+
+Two labels matter:
+
+- **`-> hs`** — already read, as that standard variable.
+- **`extra_vars`** — not read, but you can ask for it.
+
+### Asking for more variables
+
+Add them to the dataset in your campaign file:
+
+```yaml
+  s3: {kind: altimeter_s3, path: "...", extra_vars: [dist_coast_01, rain_flag_01_ku]}
+```
+
+They appear in the output as extra columns, prefixed `x_`, carried through
+untouched:
+
+```
+time,lat,lon,hs,wind_speed,sig0,x_dist_coast_01,x_rain_flag_01_ku,model_hs,...
+```
+
+The prefix keeps them separate from the standard variables, so nothing you add
+can change how the comparison is computed. They are simply carried along —
+there is no need for the model to have anything equivalent, which is the point:
+this is how you get quantities that cannot be compared to a model at all.
+
+Three things to know:
+
+- Only variables listed under `records lie on:` (here `time_01`, the 1 Hz
+  track) can be added. A 20 Hz variable is a different sampling rate, not a
+  different choice, and is refused with a message saying so.
+- Sentinel-6 stores Ku and C band under the **same names** in different groups,
+  so write them `ku:swh_ocean` and `c:swh_ocean`. `matchup vars` shows them
+  that way.
+- If you ask for something the product does not contain, you get a warning —
+  never a silent omission.
+
+Use `--all` to list the variables on the other sampling rates too.
+
+## 5. Compare
 
 ```bash
 matchup match  my_campaign.yaml jason3 ecmwf_an     # measurement first, model second
@@ -247,7 +315,7 @@ because values are then compared across a 3-hour gap) or use a measurement
 that samples the model's output times — buoys report every 30 min, so they
 always have a point at the model's hours.
 
-## 5. Verifying forecasts (by lead time)
+## 6. Verifying forecasts (by lead time)
 
 A forecast archive is a grid: one row per initialisation, one column per lead
 time. Which way you slice it decides what the statistics mean.
@@ -313,7 +381,7 @@ sample is no longer a clean tiling.
 Some model files hold many inits at once (AIFS does). Those must be told which
 to use — `matchup scan` flags them with a note rather than an error.
 
-## 6. Repeat for every combination
+## 7. Repeat for every combination
 
 Any measurement against any model — the names are all you change:
 
@@ -329,7 +397,7 @@ done
 Note the `&&`: `match` exits with an error when nothing could be matched, and
 `cstats` would otherwise print the statistics of a **previous** run's file.
 
-## 7. What was actually done to your data
+## 8. What was actually done to your data
 
 Every output records its own provenance, so a result can be audited months
 later without rerunning anything:
@@ -340,16 +408,21 @@ ncdump -h harry_s3_x_ecmwf_an.nc | grep :
 
 ```
   obs_reader             = "altimeter_s3"
-  hs_source              = "swh_ocean_01_ku (SAR mode, Ku; not _plrm_)"
+  retracker              = "sar"
+  hs_source              = "swh_ocean_01_ku (SAR mode, Ku)"
   hs_filter              = "none (swh_ocean_qual_01_ku not present in this product)"
   land_mask              = "dist_coast_01 >= 30 km and surf_type_01 in [0]"
   n_read                 = 8050
   n_rejected_coastal     = 1271
+  extra_vars             = "dist_coast_01, rain_flag_01_ku"
   time_tolerance_minutes = 30.0
   matched_per_variable   = "hs: 551/551 within tol (model every 1h); ..."
   campaign = "harry" ; obs_dataset = "s3" ; model_dataset = "ecmwf_an"
   created = "2026-07-29T21:22:35+03:00" ; matchup_version = "0.1.0"
 ```
+
+So every choice you made in the campaign file — which retracker, how far
+offshore, which extra variables — is written into the result itself.
 
 If two files in one dataset were processed differently — a delivery mixing two
 satellite processor versions, say — the attribute reads `MIXED: a | b` instead
@@ -373,6 +446,14 @@ doesn't cover yet. Send the message and the filename to Cristhian.
 **A variable shows `(no valid pairs)`** — the model has no such variable
 (e.g. wave files contain no wind), or its time steps are too far from the
 measurement times. Try `--tol-minutes`.
+
+**`extra_vars not found in the product`** — the name is not in these files.
+Run `matchup vars` to see the real names; they differ between products
+(`dist_coast_01` in Sentinel-3, `distance_to_coast` in Sentinel-6).
+
+**`extra_vars: 'x' lies on (...), but this reader builds its records on (...)`**
+— you asked for a variable sampled at a different rate (20 Hz against a 1 Hz
+track). It cannot simply be added; it needs a reader of its own. Ask Cristhian.
 
 **A comparison has fewer points than expected** — normal when the model covers
 a shorter period than the measurements (a forecast starts at its own init

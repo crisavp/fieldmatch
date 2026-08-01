@@ -50,6 +50,7 @@ obs↔model file pairing are automatic.
 
 ```bash
 matchup scan   config/campaigns/harry.yaml                   # inventory the data
+matchup vars   config/campaigns/harry.yaml s3                # what is in the files
 matchup match  config/campaigns/harry.yaml jason3 ecmwf_an   # collocate -> .nc + .csv
 matchup cstats config/campaigns/harry.yaml jason3 ecmwf_an   # stats table + plots
 ```
@@ -63,6 +64,9 @@ matchup cstats config/campaigns/harry.yaml jason3 ecmwf_an   # stats table + plo
   `<outdir>/<campaign>_<obs>_x_<model>.nc` **and `.csv`**. Exits non-zero when
   nothing matches, so scripts must check (`match ... && cstats ...`) or they
   will read a stale output.
+- **`vars`** — a product's source variables grouped by the axis they lie on,
+  marking which are already read as a standard name and which can be pulled
+  through with `extra_vars`. `--all` includes the other sampling rates.
 - **`cstats`** — bias / RMSE / SI / correlation / symmetric slope per variable
   (circular statistics for directions), plus scatter + difference-map PNGs.
   `--by-lead` splits a forecast collocation into lead bands.
@@ -118,6 +122,26 @@ GRIBs mixing editions.
 
 **Adding a format is one function** in `readers.py` returning the canonical
 cloud, plus one line in `READERS` — no changes anywhere else.
+
+## What config may and may not do
+
+The readers keep a small standard map (Sentinel-3 RED ships 65 variables;
+three become `hs`/`wind_speed`/`sig0`). A campaign file may:
+
+- **add** any other variable on the same record axis, via `extra_vars: [...]`.
+  They arrive under an `x_` prefix and are carried through untouched;
+- **choose** among named alternatives for a standard slot: `retracker:
+  sar|plrm` (S3), `retracker: mle|nr` and `band: ku|c` (S6), `qc`,
+  `min_dist_coast_km`, `open_ocean_only`.
+
+It may **not redefine what a standard name means**. `collocate_track` keys
+circular interpolation and circular statistics off names like `wind_dir`, and
+derives `wind_speed`/`wind_dir` from interpolated `u10`/`v10` — free-form
+remapping would let a YAML edit silently change the physics. The `x_` prefix
+exists so a passthrough column can never acquire those behaviours.
+
+Variables on another axis (20 Hz against a 1 Hz track) are refused with the
+axis named: that is a format problem needing reader support, not a preference.
 
 ## Architecture
 
