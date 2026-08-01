@@ -170,22 +170,49 @@ make those unreachable.** Concretely:
 11. **Do not unify the two output contracts.** The archive product exists for
     `wfetch`; the campaign product exists for a human reading a CSV.
 
-12. **Q8 tier 2 — a small, named set of scientific overrides** in the campaign
-    file (after tier 1, item 7). Roughly six options, each one line of docs:
-    `retracker: sar|plrm` (S3), `retracker: mle|nr` (S6), `qc: true|false`
-    (S1), `max_dist_coast_km`. Not a general variable-exposure mechanism: the
-    config must never remap arbitrary names into standard slots, or every
-    campaign file becomes a place for silent scientific errors.
+12. ~~Q8 tier 2 — a small, named set of scientific overrides.~~
+    **DONE 2026-08-01.** `retracker: sar|plrm` (S3), `retracker: mle|nr` and
+    `band: ku|c` (S6), alongside the already-shipped `qc`, `min_dist_coast_km`
+    and `open_ocean_only`. Enumerated, not free strings: an unknown value
+    fails listing the alternatives, and `retracker=nr` with `band=c` is
+    refused because the C-band group ships no numerical-retracker variables.
+    The choice is recorded in provenance (`retracker`, `band`, `hs_source`).
 
-13. **Q8 tier 3 — `extra_vars: [...]`** escape hatch passing named raw
-    variables through unstandardized, so "I need one more field" never
-    requires editing `readers.py`. Cheap; keeps matchup out of the business of
-    standardizing all 401 S3 variables.
-    **Promote this**: it is the mechanism behind the design principle at the
-    top of this file, not a convenience. An advanced user who wants `sig0`,
-    a rain flag, a wave period or a retracker diagnostic should get it from
-    the campaign file, and those columns should ride through collocation into
-    the CSV untouched even though no model field matches them.
+    Measured on Harry: SAR vs PLRM makes almost no difference inside the
+    campaign box — hs bias −0.11 both, rmse 0.34 both, slope 0.955 vs 0.953.
+    (Whole-track means differ by 0.29 m, but that is global sea-state
+    sampling, not a retracker bias.) So cross-mission consistency with
+    Jason-class altimeters is available if wanted, and nothing here hinges
+    on it.
+
+13. ~~Q8 tier 3 — `extra_vars: [...]`~~ **DONE 2026-08-01**, together with the
+    discoverability command that makes it usable:
+
+    - **`matchup vars <campaign> <dataset>`** lists a product's source
+      variables grouped by the axis they lie on, marking which are already
+      read as a standard name and which are eligible for `extra_vars`, with
+      units, long names and flag meanings. Reads `readers.LAYOUT`, so the
+      listing cannot drift from what the readers do. `--all` shows the other
+      axes, labelled as needing reader support.
+    - **`extra_vars: [...]`** carries named variables through verbatim under an
+      `x_` prefix, into the collocated netCDF and the CSV.
+
+    Three rules make it safe, and they are the boundary of what config may do:
+    only variables on the reader's own record axis are accepted (a 20 Hz S3
+    variable is refused *with the axis named* — a format problem, not a
+    preference); Sentinel-6's identically-named Ku and C variables are written
+    `ku:swh_ocean` / `c:swh_ocean` and land in separate columns; and a
+    requested variable absent from the product warns and is recorded rather
+    than silently dropped.
+
+    **What config still may NOT do**: redefine what a standard name means.
+    `collocate_track` keys circular interpolation and circular statistics off
+    names like `wind_dir`, and derives `wind_speed`/`wind_dir` from
+    interpolated `u10`/`v10`. Free-form remapping would let a YAML edit
+    silently change the physics, so extras live in their own `x_` namespace
+    where they can never acquire those behaviours. Config may **add**
+    variables and **choose among named alternatives** (item 12); it may not
+    **redefine** a slot.
 
 ## Blocked — fresh-environment install is unverified (2026-07-30)
 

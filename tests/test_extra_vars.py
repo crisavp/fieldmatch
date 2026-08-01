@@ -72,3 +72,17 @@ def test_group_qualified_names_do_not_collide():
 def test_no_extra_vars_is_a_no_op():
     out, prov = _collect_extras(_src(), None, "time_01", {"hs": np.zeros(3)}, {})
     assert list(out) == ["hs"] and prov == {}
+
+
+# ── enumerated overrides (retracker / band) ─────────────────────────────────
+
+def test_choice_rejects_unknown_value_listing_the_alternatives():
+    from matchup.readers import _choice
+    with pytest.raises(ValueError, match=r"choose one of \['mle', 'nr'\]"):
+        _choice("retracker", "bogus", {"mle": "", "nr": "_nr"})
+
+
+def test_choice_returns_the_mapped_suffix():
+    from matchup.readers import S3_RETRACKERS, _choice
+    assert _choice("retracker", "sar", S3_RETRACKERS) == "_01_ku"
+    assert _choice("retracker", "plrm", S3_RETRACKERS) == "_01_plrm_ku"

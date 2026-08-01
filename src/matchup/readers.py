@@ -124,6 +124,21 @@ LAYOUT = {
 }
 
 
+def _choice(option, value, allowed):
+    """Validate an enumerated campaign option, failing loudly with the choices.
+
+    Enumerated rather than free-form on purpose: these select among retrievals
+    the reader knows how to handle. A free string would let the config name a
+    variable the reader cannot decode (wrong rate, wrong group) and turn a
+    scientific choice into a shape error.
+    """
+    if value not in allowed:
+        raise ValueError(
+            f"{option}={value!r} is not available; choose one of "
+            f"{sorted(allowed)}.")
+    return allowed[value]
+
+
 def _unqualified(extra_vars, group):
     """Names for one group from a possibly 'group:name'-qualified list.
 
@@ -260,23 +275,36 @@ def read_altimeter_cmems(file, extra_vars=None, **_):
         )
 
 
+#: Sentinel-3 retracker choice. SAR mode is the native SRAL retrieval; PLRM
+#: (pseudo-LRM) reprocesses the same echoes in a Jason-like way and is what you
+#: want for strict cross-mission consistency with LRM altimeters.
+S3_RETRACKERS = {"sar": "_01_ku", "plrm": "_01_plrm_ku"}
+
+
 def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
-                      open_ocean_only=True, extra_vars=None, **_):
-    """Sentinel-3 SRAL L2 WAT (RED/STD/ENH): use the 1 Hz (`_01`) Ku-band
-    ocean retracker. Quality flags applied when present (0 = good); coastal
-    and non-open-sea observations dropped (see _open_sea_mask)."""
+                      open_ocean_only=True, extra_vars=None, retracker="sar", **_):
+    """Sentinel-3 SRAL L2 WAT (RED/STD/ENH): 1 Hz (`_01`) Ku-band ocean
+    retracker. `retracker='plrm'` selects the pseudo-LRM retrieval instead.
+    Quality flags applied when present (0 = good); coastal and non-open-sea
+    observations dropped (see _open_sea_mask)."""
+    sfx = _choice("retracker", retracker, S3_RETRACKERS)
     with xr.open_dataset(file, decode_timedelta=False) as src:
-        out = {"hs": src["swh_ocean_01_ku"].values,
-               "wind_speed": src["wind_speed_alt_01_ku"].values,
-               "sig0": src["sig0_ocean_01_ku"].values}
+        names = {"hs": f"swh_ocean{sfx}", "wind_speed": f"wind_speed_alt{sfx}",
+                 "sig0": f"sig0_ocean{sfx}"}
+        missing = [v for v in names.values() if v not in src.variables]
+        if missing:
+            raise ValueError(
+                f"retracker={retracker!r} needs {missing}, absent from this "
+                f"product; try one of {sorted(S3_RETRACKERS)}.")
+        out = {std: src[raw].values for std, raw in names.items()}
         out, qc_prov, n_qual = _qc_by_flag(src, out, (
-            ("hs", "swh_ocean_qual_01_ku"),
-            ("wind_speed", "wind_speed_alt_qual_01_ku"),
-            ("sig0", "sig0_ocean_qual_01_ku")))
-        prov = {"reader": "altimeter_s3",
-                "hs_source": "swh_ocean_01_ku (SAR mode, Ku; not _plrm_)",
-                "wind_speed_source": "wind_speed_alt_01_ku",
-                "sig0_source": "sig0_ocean_01_ku",
+            ("hs", f"swh_ocean_qual{sfx}"),
+            ("wind_speed", f"wind_speed_alt_qual{sfx}"),
+            ("sig0", f"sig0_ocean_qual{sfx}")))
+        prov = {"reader": "altimeter_s3", "retracker": retracker,
+                "hs_source": f"{names['hs']} ({retracker.upper()} mode, Ku)",
+                "wind_speed_source": names["wind_speed"],
+                "sig0_source": names["sig0"],
                 "rate": "1 Hz (_01)", "n_rejected_qual": n_qual,
                 "n_read": int(src.sizes["time_01"]), **qc_prov}
         out, prov = _collect_extras(src, extra_vars, "time_01", out, prov)
@@ -288,22 +316,37 @@ def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
             provenance=prov)
 
 
+#: Sentinel-6 retracker: the standard MLE retrieval, or the numerical ocean
+#: retracker (`_nr`). Ku only -- the C-band group ships no `_nr` variables.
+S6_RETRACKERS = {"mle": "", "nr": "_nr"}
+S6_BANDS = {"ku": "data_01/ku", "c": "data_01/c"}
+
+
 def read_altimeter_s6(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
-                      open_ocean_only=True, extra_vars=None, **_):
+                      open_ocean_only=True, extra_vars=None,
+                      retracker="mle", band="ku", **_):
     """Sentinel-6 P4 L2 LR (RED/STD): netCDF groups. 1 Hz `data_01` for
-    position/time/wind, `data_01/ku` for swh/sig0. Quality: *_qual == 0;
+    position/time/wind, `data_01/<band>` for swh/sig0. `retracker='nr'`
+    selects the numerical ocean retracker (Ku only). Quality: *_qual == 0;
     coastal and non-open-sea observations dropped."""
+    sfx = _choice("retracker", retracker, S6_RETRACKERS)
+    grp = _choice("band", band, S6_BANDS)
+    if sfx and band != "ku":
+        raise ValueError(
+            "retracker='nr' exists only for band='ku'; the C-band group ships "
+            "no numerical-retracker variables.")
     with xr.open_dataset(file, group="data_01", decode_timedelta=False) as g1, \
-         xr.open_dataset(file, group="data_01/ku", decode_timedelta=False) as gku:
-        out = {"hs": gku["swh_ocean"].values, "sig0": gku["sig0_ocean"].values,
-               "wind_speed": g1["wind_speed_alt"].values}
+         xr.open_dataset(file, group=grp, decode_timedelta=False) as gku:
+        out = {"hs": gku[f"swh_ocean{sfx}"].values,
+               "sig0": gku[f"sig0_ocean{sfx}"].values,
+               "wind_speed": g1[f"wind_speed_alt{sfx}"].values}
         out, qc_prov, n_qual = _qc_by_flag(gku, out, (
-            ("hs", "swh_ocean_qual"), ("sig0", "sig0_ocean_qual")))
+            ("hs", f"swh_ocean{sfx}_qual"), ("sig0", f"sig0_ocean{sfx}_qual")))
         qc_prov["wind_speed_filter"] = "none (no quality flag applied to wind_speed_alt)"
-        prov = {"reader": "altimeter_s6",
-                "hs_source": "data_01/ku:swh_ocean (MLE retracker; not _nr)",
-                "sig0_source": "data_01/ku:sig0_ocean",
-                "wind_speed_source": "data_01:wind_speed_alt",
+        prov = {"reader": "altimeter_s6", "retracker": retracker, "band": band,
+                "hs_source": f"{grp}:swh_ocean{sfx} ({retracker.upper()})",
+                "sig0_source": f"{grp}:sig0_ocean{sfx}",
+                "wind_speed_source": f"data_01:wind_speed_alt{sfx}",
                 "rate": "1 Hz (data_01)", "n_rejected_qual": n_qual,
                 "n_read": int(g1.sizes["time"]), **qc_prov}
         # Ku and C share variable names, so extras may be qualified 'ku:name'
