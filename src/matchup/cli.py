@@ -159,6 +159,26 @@ def scan(campaign: Path = typer.Argument(..., exists=True, dir_okay=False,
     rprint(format_report(camp, scan_campaign(camp)))
 
 
+@app.command()
+def vars(campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
+         dataset: str = typer.Argument(..., help="Obs dataset name in the campaign."),
+         all: bool = typer.Option(
+             False, "--all", help="Also list variables on other axes/rates.")):
+    """List a dataset's source variables: what is read, what can be added.
+
+    Shows which raw variables already map to a standard name and which can be
+    pulled through verbatim with `extra_vars:` in the campaign file.
+    """
+    from .campaign import load_campaign
+    from .varlist import describe_dataset, format_vars
+    camp = load_campaign(campaign)
+    dset = camp.get(dataset)
+    if dset.role != "obs":
+        raise typer.BadParameter(f"'{dataset}' is a model dataset; `vars` describes "
+                                 "observation products.")
+    print(format_vars(dataset, describe_dataset(dset), show_all=all))
+
+
 def _load_pair(campaign, obs_name, model_name):
     from .campaign import MODEL_KINDS, load_campaign
     camp = load_campaign(campaign)
@@ -265,6 +285,12 @@ def match(campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
     # A variable can be empty while the row survives on another variable --
     # say so, or an all-NaN column looks like missing data rather than a
     # cadence mismatch.
+    if pair.attrs.get("extra_vars"):
+        rprint(f"  extra columns: {pair.attrs['extra_vars']}")
+    if pair.attrs.get("extra_vars_missing"):
+        rprint(f"  [yellow]extra_vars not found in the product: "
+               f"{pair.attrs['extra_vars_missing']}[/yellow] "
+               f"(see `matchup vars`)")
     for item in pair.attrs.get("matched_per_variable", "").split("; "):
         if item.startswith(tuple(f"{v}: 0/" for v in pair.data_vars)):
             rprint(f"  [yellow]{item} -- no pairs at {tolm:.0f} min "

@@ -100,6 +100,91 @@ def _open_sea_cloud(src, time, lat, lon, data_vars, dist_var, surf_var,
 #: combined, rather than inherited from whichever file happened to be first.
 COUNT_ATTRS = ("n_rejected_coastal", "n_rejected_qual", "n_read")
 
+#: Prefix for pass-through columns requested via `extra_vars`. Keeps them in a
+#: namespace of their own so a raw variable can never collide with a standard
+#: name, nor accidentally trigger the direction/vector handling that
+#: collocate_track keys off names like `wind_dir`.
+EXTRA_PREFIX = "x_"
+
+#: Where each obs kind's cloud is built from: the netCDF group holding the
+#: geolocation, and the dimension its records lie on. `varlist` uses this to
+#: show the user exactly the variables that `extra_vars` can accept, so the
+#: lister and the readers cannot drift apart.
+#:   group: netCDF group to open (None = root)
+#:   dim:   dimension the canonical cloud is indexed by
+#:   extra_groups: further groups whose variables share that dimension
+LAYOUT = {
+    "altimeter_cmems": {"group": None, "dim": "time", "extra_groups": ()},
+    "altimeter_s3": {"group": None, "dim": "time_01", "extra_groups": ()},
+    "altimeter_s6": {"group": "data_01", "dim": "time",
+                     "extra_groups": ("data_01/ku", "data_01/c")},
+    "sentinel1": {"group": None, "dim": ("owiAzSize", "owiRaSize"), "extra_groups": ()},
+    "ascat": {"group": None, "dim": ("NUMROWS", "NUMCELLS"), "extra_groups": ()},
+    "buoy_ispra": {"group": None, "dim": None, "extra_groups": ()},   # CSV
+}
+
+
+def _unqualified(extra_vars, group):
+    """Names for one group from a possibly 'group:name'-qualified list.
+
+    `group=None` selects the unqualified names (the reader's own group);
+    `group='ku'` selects those written 'ku:swh_ocean', stripped of the prefix.
+    """
+    if not extra_vars:
+        return []
+    want = [extra_vars] if isinstance(extra_vars, str) else list(extra_vars)
+    out = []
+    for name in want:
+        head, sep, tail = name.partition(":")
+        if sep and group == head:
+            out.append(tail)
+        elif not sep and group is None:
+            out.append(name)
+    return out
+
+
+def _collect_extras(src, extra_vars, dim, out, prov, group_label=""):
+    """Add `extra_vars` to `out` unchanged, under the EXTRA_PREFIX namespace.
+
+    Only variables lying on the cloud's own dimension can be carried: a 20 Hz
+    Sentinel-3 variable has 40 679 records against the 1 Hz track's 2 036, so
+    it is a different axis, not a different preference. Refused with the axis
+    named rather than silently reshaped or dropped.
+    """
+    if not extra_vars:
+        return out, prov
+    want = [extra_vars] if isinstance(extra_vars, str) else list(extra_vars)
+    dims = dim if isinstance(dim, tuple) else (dim,)
+    taken, missing = [], []
+    for name in want:
+        if name not in src.variables:
+            missing.append(name)
+            continue
+        got = tuple(src[name].dims)
+        if got != tuple(dims):
+            raise ValueError(
+                f"extra_vars: {name!r} lies on {got}, but this reader builds its "
+                f"records on {tuple(dims)}. Variables on another axis need reader "
+                f"support, not configuration -- see `matchup vars`.")
+        # Keep the group in the column name: Ku and C share variable names, so
+        # 'ku:swh_ocean' and 'c:swh_ocean' must not collapse onto one column.
+        col = f"{EXTRA_PREFIX}{group_label.replace(':', '_')}{name}"
+        out[col] = src[name].values
+        taken.append(f"{group_label}{name}")
+    if taken:
+        prov["extra_vars"] = ", ".join(sorted(set(
+            prov.get("extra_vars", "").split(", ") + taken)) ).strip(", ")
+    if missing:
+        # Never silently drop a requested variable: the whole point of
+        # extra_vars is to stop the library hiding what a product contains.
+        prov["extra_vars_missing"] = ", ".join(
+            sorted(set(prov.get("extra_vars_missing", "").split(", ") + missing))
+        ).strip(", ")
+        warnings.warn(
+            f"extra_vars: {', '.join(missing)} not present in this product "
+            f"(run `matchup vars` to see what is). Continuing without them.")
+    return out, prov
+
 
 def _cloud(time, lat, lon, data_vars, provenance=None):
     """Assemble the canonical obs Dataset from 1-D arrays.
@@ -143,7 +228,7 @@ def _qc_by_flag(src, values, var_flag_pairs):
 
 
 # ── altimeters ─────────────────────────────────────────────────────────────
-def read_altimeter_cmems(file, **_):
+def read_altimeter_cmems(file, extra_vars=None, **_):
     """CMEMS L3 near-real-time altimetry (global_vavh_l3_rt_*): already a flat
     along-track cloud. VAVH -> hs (filtered), WIND_SPEED -> wind_speed.
 
@@ -154,12 +239,14 @@ def read_altimeter_cmems(file, **_):
     than implying a filter that was never applied.
     """
     with xr.open_dataset(file) as src:
+        out = {"hs": src["VAVH"].values,
+               "hs_unfiltered": src["VAVH_UNFILTERED"].values,
+               "wind_speed": src["WIND_SPEED"].values}
+        out, extra_prov = _collect_extras(src, extra_vars, "time", out, {})
         return _cloud(
             src["time"].values, src["latitude"].values, src["longitude"].values,
-            {"hs": src["VAVH"].values,
-             "hs_unfiltered": src["VAVH_UNFILTERED"].values,
-             "wind_speed": src["WIND_SPEED"].values},
-            provenance={
+            out,
+            provenance={**extra_prov,
                 "reader": "altimeter_cmems",
                 "hs_source": "VAVH", "hs_unfiltered_source": "VAVH_UNFILTERED",
                 "wind_speed_source": "WIND_SPEED",
@@ -174,7 +261,7 @@ def read_altimeter_cmems(file, **_):
 
 
 def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
-                      open_ocean_only=True, **_):
+                      open_ocean_only=True, extra_vars=None, **_):
     """Sentinel-3 SRAL L2 WAT (RED/STD/ENH): use the 1 Hz (`_01`) Ku-band
     ocean retracker. Quality flags applied when present (0 = good); coastal
     and non-open-sea observations dropped (see _open_sea_mask)."""
@@ -192,6 +279,7 @@ def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
                 "sig0_source": "sig0_ocean_01_ku",
                 "rate": "1 Hz (_01)", "n_rejected_qual": n_qual,
                 "n_read": int(src.sizes["time_01"]), **qc_prov}
+        out, prov = _collect_extras(src, extra_vars, "time_01", out, prov)
         return _open_sea_cloud(
             src, src["time_01"].values, src["lat_01"].values,
             src["lon_01"].values, out,
@@ -201,7 +289,7 @@ def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
 
 
 def read_altimeter_s6(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
-                      open_ocean_only=True, **_):
+                      open_ocean_only=True, extra_vars=None, **_):
     """Sentinel-6 P4 L2 LR (RED/STD): netCDF groups. 1 Hz `data_01` for
     position/time/wind, `data_01/ku` for swh/sig0. Quality: *_qual == 0;
     coastal and non-open-sea observations dropped."""
@@ -218,6 +306,18 @@ def read_altimeter_s6(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
                 "wind_speed_source": "data_01:wind_speed_alt",
                 "rate": "1 Hz (data_01)", "n_rejected_qual": n_qual,
                 "n_read": int(g1.sizes["time"]), **qc_prov}
+        # Ku and C share variable names, so extras may be qualified 'ku:name'
+        # / 'c:name' exactly as `matchup vars` displays them.
+        out, prov = _collect_extras(g1, _unqualified(extra_vars, None), "time",
+                                    out, prov)
+        for band in ("ku", "c"):
+            names = _unqualified(extra_vars, band)
+            if not names:
+                continue
+            with xr.open_dataset(file, group=f"data_01/{band}",
+                                 decode_timedelta=False) as gb:
+                out, prov = _collect_extras(gb, names, "time", out, prov,
+                                            group_label=f"{band}:")
         return _open_sea_cloud(
             g1, g1["time"].values, g1["latitude"].values, g1["longitude"].values,
             out,
@@ -255,7 +355,7 @@ def s1_good_quality_values(qflag):
 _s1_good_values = s1_good_quality_values
 
 
-def read_sentinel1(file, qc=True, **_):
+def read_sentinel1(file, qc=True, extra_vars=None, **_):
     """Sentinel-1 IW OCN merged product (owi wind grid): flatten the 2-D swath
     into an obs cloud stamped with the scene time (attrs firstMeasurementTime).
     QC keeps quality in {good, acceptable} (IPF-aware) and owiMask == valid."""
@@ -288,6 +388,8 @@ def read_sentinel1(file, qc=True, **_):
                                    "the CMOD inversion -- SAR wind is not independent "
                                    "of ECMWF"),
         }
+        out, prov = _collect_extras(src, extra_vars,
+                                    ("owiAzSize", "owiRaSize"), out, prov)
         return _cloud(t, src["owiLat"].values, src["owiLon"].values, out,
                       provenance=prov)
 
