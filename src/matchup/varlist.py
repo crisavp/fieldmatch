@@ -36,33 +36,48 @@ def _open_groups(path, kind):
     return out
 
 
-def _mapped_sources(kind):
-    """{source variable: standard name} the reader for `kind` uses.
+def _clean_source(raw):
+    """'data_01/ku:swh_ocean (MLE)' -> 'ku:swh_ocean'; 'VAVH' -> 'VAVH'.
 
-    Parsed from the reader's own provenance record so this cannot drift: the
-    readers write `<standard>_source = "<raw> (notes)"` into every output.
+    Provenance values carry a human note and, for grouped products, the full
+    group path. Reduce them to the name this module displays.
     """
-    from . import readers as _r
-    probes = {
-        "altimeter_cmems": {"VAVH": "hs", "VAVH_UNFILTERED": "hs_unfiltered",
-                            "WIND_SPEED": "wind_speed"},
-        "altimeter_s3": {"swh_ocean_01_ku": "hs",
-                         "wind_speed_alt_01_ku": "wind_speed",
-                         "sig0_ocean_01_ku": "sig0",
-                         "lat_01": "lat", "lon_01": "lon", "time_01": "time"},
-        # Group-qualified: Ku and C carry the same names, and only Ku is read.
-        "altimeter_s6": {"ku:swh_ocean": "hs", "ku:sig0_ocean": "sig0",
-                         "wind_speed_alt": "wind_speed",
-                         "latitude": "lat", "longitude": "lon", "time": "time"},
-        "sentinel1": {"owiWindSpeed": "wind_speed", "owiWindDirection": "wind_dir",
-                      "owiEcmwfWindSpeed": "ecmwf_wind_speed",
-                      "owiEcmwfWindDirection": "ecmwf_wind_dir",
-                      "owiLat": "lat", "owiLon": "lon"},
-        "ascat": {"wind_speed": "wind_speed", "wind_dir": "wind_dir",
-                  "lat": "lat", "lon": "lon", "time": "time"},
-        "buoy_ispra": dict(_r._BUOY_COLS),
-    }
-    return probes.get(kind, {})
+    name = raw.split(" (")[0].strip()
+    if name.startswith("(") or not name:
+        return None                      # e.g. '(campaign file: lat)'
+    if ":" in name:                      # data_01/ku:swh_ocean -> ku:swh_ocean
+        group, _, var = name.rpartition(":")
+        short = group.rsplit("/", 1)[-1]
+        return f"{short}:{var}" if short and short != "data_01" else var
+    return name
+
+
+def _mapped_sources(dset, path):
+    """{source variable: standard name} the reader actually used.
+
+    Derived by RUNNING the reader on the sample file and reading the
+    `<standard>_source` attributes it wrote, rather than from a table kept
+    alongside. A hardcoded copy silently went stale once already (CMEMS
+    latitude/longitude/time showed as unmapped), which is exactly the drift
+    this command exists to prevent.
+    """
+    from .readers import read_obs
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ds = read_obs(dset.kind, path, **dset.options)
+    except Exception:
+        return {}                        # listing still works, just unannotated
+    if ds is None:
+        return {}
+    mapped = {}
+    for key, val in ds.attrs.items():
+        if not key.endswith("_source"):
+            continue
+        name = _clean_source(str(val))
+        if name:
+            mapped[name] = key[: -len("_source")]
+    return mapped
 
 
 def describe_dataset(dset):
@@ -76,12 +91,12 @@ def describe_dataset(dset):
     if layout is None:
         return {"error": f"no layout known for kind {kind!r}"}
     if kind == "buoy_ispra":
-        return _describe_csv(path, kind, len(files))
+        return _describe_csv(path, dset, len(files))
 
     groups = _open_groups(path, kind)
     if not groups:
         return {"error": f"could not open {path}"}
-    mapped = _mapped_sources(kind)
+    mapped = _mapped_sources(dset, path)
     cloud_dim = layout["dim"]
     cloud_dims = cloud_dim if isinstance(cloud_dim, tuple) else (cloud_dim,)
 
@@ -121,12 +136,12 @@ def describe_dataset(dset):
             "cloud_dims": cloud_dims, "axes": axes}
 
 
-def _describe_csv(path, kind, n_files):
+def _describe_csv(path, dset, n_files):
     """Buoy CSVs: one flat table, so every column is on the same axis."""
     import csv
     with open(path) as fh:
         header = next(csv.reader(fh, delimiter=";"))
-    mapped = _mapped_sources(kind)
+    mapped = _mapped_sources(dset, path)
     entries = []
     for h in header:
         name = h.split(" [")[0].strip()
@@ -134,7 +149,7 @@ def _describe_csv(path, kind, n_files):
         entries.append({"name": name, "group": "/", "n": 0, "units": unit,
                         "long_name": "", "flags": "",
                         "mapped_to": mapped.get(name), "usable": True})
-    return {"path": path, "kind": kind, "n_files": n_files,
+    return {"path": path, "kind": dset.kind, "n_files": n_files,
             "cloud_dims": ("row",), "axes": {("row",): entries}}
 
 
@@ -149,10 +164,18 @@ def format_vars(name, desc, show_all=False, width=78):
     L.extend(_wrap_text(os.path.basename(desc["path"]), "  sample : ", width=width))
     L.append(f"  records lie on: {' x '.join(desc['cloud_dims'])}")
 
+    # Column width from the longest tag actually present, with a guaranteed
+    # trailing space: a long standard name (`-> hs_unfiltered`) used to run
+    # straight into the units, reading as 'hs_unfilteredm'.
+    tags = [f"-> {e['mapped_to']}" if e["mapped_to"]
+            else ("extra_vars" if e["usable"] else "")
+            for entries in desc["axes"].values() for e in entries]
+    tagw = max([len(t) for t in tags] + [10]) + 1
+
     def _fmt(e):
         tag = (f"-> {e['mapped_to']}" if e["mapped_to"]
                else ("extra_vars" if e["usable"] else ""))
-        head = f"    {e['name']:<28} {tag:<14}"
+        head = f"    {e['name']:<28} {tag:<{tagw}}"
         detail = " ".join(x for x in (e["units"], e["long_name"]) if x)
         if not detail:
             return [head.rstrip()]

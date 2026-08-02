@@ -265,6 +265,8 @@ def read_altimeter_cmems(file, extra_vars=None, **_):
                 "reader": "altimeter_cmems",
                 "hs_source": "VAVH", "hs_unfiltered_source": "VAVH_UNFILTERED",
                 "wind_speed_source": "WIND_SPEED",
+                "lat_source": "latitude", "lon_source": "longitude",
+                "time_source": "time",
                 "hs_filter": "none (CMEMS L3 is edited upstream)",
                 "wind_speed_filter": "none (CMEMS L3 is edited upstream)",
                 "land_mask": ("none (CMEMS L3 carries no dist_coast or surface "
@@ -305,6 +307,8 @@ def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
                 "hs_source": f"{names['hs']} ({retracker.upper()} mode, Ku)",
                 "wind_speed_source": names["wind_speed"],
                 "sig0_source": names["sig0"],
+                "lat_source": "lat_01", "lon_source": "lon_01",
+                "time_source": "time_01",
                 "rate": "1 Hz (_01)", "n_rejected_qual": n_qual,
                 "n_read": int(src.sizes["time_01"]), **qc_prov}
         out, prov = _collect_extras(src, extra_vars, "time_01", out, prov)
@@ -347,6 +351,8 @@ def read_altimeter_s6(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
                 "hs_source": f"{grp}:swh_ocean{sfx} ({retracker.upper()})",
                 "sig0_source": f"{grp}:sig0_ocean{sfx}",
                 "wind_speed_source": f"data_01:wind_speed_alt{sfx}",
+                "lat_source": "latitude", "lon_source": "longitude",
+                "time_source": "time",
                 "rate": "1 Hz (data_01)", "n_rejected_qual": n_qual,
                 "n_read": int(g1.sizes["time"]), **qc_prov}
         # Ku and C share variable names, so extras may be qualified 'ku:name'
@@ -421,6 +427,8 @@ def read_sentinel1(file, qc=True, extra_vars=None, **_):
         prov = {
             "reader": "sentinel1",
             "wind_speed_source": "owiWindSpeed", "wind_dir_source": "owiWindDirection",
+            "lat_source": "owiLat", "lon_source": "owiLon",
+            "time_source": "(global attribute firstMeasurementTime)",
             "wind_speed_filter": (f"owiWindQuality in {good} and owiMask == 0 "
                                   f"(IPF {src.attrs.get('IPFversion', '?')})"
                                   if qc else "none (qc=False)"),
@@ -486,6 +494,8 @@ def read_buoy_ispra(file, lat=None, lon=None, **_):
         out[name] = vals
         sources[f"{name}_source"] = src_name
     prov = {"reader": "buoy_ispra", "position": f"lat {lat}, lon {lon} (from config)",
+            "time_source": header[0],
+            "lat_source": "(campaign file: lat)", "lon_source": "(campaign file: lon)",
             "land_mask": "n/a (moored buoy at a fixed position)",
             "n_rejected_coastal": 0, "n_rejected_qual": 0, "n_read": int(t.size),
             **sources}

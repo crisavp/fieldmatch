@@ -86,3 +86,31 @@ def test_choice_returns_the_mapped_suffix():
     from matchup.readers import S3_RETRACKERS, _choice
     assert _choice("retracker", "sar", S3_RETRACKERS) == "_01_ku"
     assert _choice("retracker", "plrm", S3_RETRACKERS) == "_01_plrm_ku"
+
+
+# ── `matchup vars` mapping (regression: coordinates shown as unmapped) ──────
+
+def test_clean_source_reduces_provenance_to_display_names():
+    from matchup.varlist import _clean_source
+    assert _clean_source("VAVH") == "VAVH"
+    assert _clean_source("swh_ocean_01_ku (SAR mode, Ku)") == "swh_ocean_01_ku"
+    assert _clean_source("data_01/ku:swh_ocean (MLE)") == "ku:swh_ocean"
+    assert _clean_source("data_01:wind_speed_alt") == "wind_speed_alt"
+    # Not a variable at all -> not listed as mapped.
+    assert _clean_source("(campaign file: lat)") is None
+    assert _clean_source("(global attribute firstMeasurementTime)") is None
+
+
+def test_every_reader_declares_its_coordinate_sources():
+    """Regression: `matchup vars` listed CMEMS latitude/longitude/time as
+    `extra_vars` because the mapping was a hand-kept table that had gone
+    stale. The mapping is now derived from each reader's own provenance, so
+    every reader must actually declare where its coordinates came from."""
+    import inspect
+
+    from matchup import readers as r
+    for kind in ("altimeter_cmems", "altimeter_s3", "altimeter_s6",
+                 "sentinel1", "buoy_ispra"):
+        src = inspect.getsource(r.READERS[kind])
+        for coord in ("lat_source", "lon_source", "time_source"):
+            assert coord in src, f"{kind} does not declare {coord}"
