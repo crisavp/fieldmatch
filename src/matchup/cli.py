@@ -164,19 +164,17 @@ def vars(campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
          dataset: str = typer.Argument(..., help="Obs dataset name in the campaign."),
          all: bool = typer.Option(
              False, "--all", help="Also list variables on other axes/rates.")):
-    """List a dataset's source variables: what is read, what can be added.
+    """List a dataset's variables: what is read, and what can be added.
 
-    Shows which raw variables already map to a standard name and which can be
-    pulled through verbatim with `extra_vars:` in the campaign file.
+    For observations, shows which raw variables already map to a standard name
+    and which can be pulled through verbatim with `extra_vars:`. For models,
+    lists every field with its own output cadence -- models hide nothing, so
+    there is no `extra_vars` for them.
     """
     from .campaign import load_campaign
     from .varlist import describe_dataset, format_vars
     camp = load_campaign(campaign)
-    dset = camp.get(dataset)
-    if dset.role != "obs":
-        raise typer.BadParameter(f"'{dataset}' is a model dataset; `vars` describes "
-                                 "observation products.")
-    print(format_vars(dataset, describe_dataset(dset), show_all=all))
+    print(format_vars(dataset, describe_dataset(camp.get(dataset)), show_all=all))
 
 
 def _load_pair(campaign, obs_name, model_name):

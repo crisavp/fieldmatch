@@ -36,6 +36,22 @@ def _open_groups(path, kind):
     return out
 
 
+def _decode_flags(var):
+    """CF flag metadata -> '0=no_rain 1=rain ...'.
+
+    A flag variable is categorical: it stores small integers, and the file
+    says what each one means via `flag_values` + `flag_meanings`. Showing the
+    bare meanings alone ('no_rain rain ...') leaves the reader to guess which
+    number is which; pairing them makes the variable usable without the spec.
+    """
+    meanings = str(var.attrs.get("flag_meanings", "")).split()
+    if not meanings:
+        return ""
+    values = np.atleast_1d(var.attrs.get("flag_values", np.arange(len(meanings))))
+    pairs = [f"{int(v)}={m}" for v, m in zip(values, meanings)]
+    return " ".join(pairs)
+
+
 def _clean_source(raw):
     """'data_01/ku:swh_ocean (MLE)' -> 'ku:swh_ocean'; 'VAVH' -> 'VAVH'.
 
@@ -80,8 +96,48 @@ def _mapped_sources(dset, path):
     return mapped
 
 
+def describe_model(dset):
+    """Model datasets: every variable is already exposed, so this is a plain
+    listing with each variable's own output cadence -- there is nothing to
+    'add', because nothing was withheld."""
+    from .campaign import MODEL_KINDS
+    from .models import open_model
+    from .scan import _fmt_step, var_cadences
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ds = open_model(dset.paths, engine=MODEL_KINDS[dset.kind], **dset.options)
+    except ValueError as e:
+        if "several forecast inits" in str(e):
+            return {"error": "multi-init forecast archive -- set `init:` in the "
+                             "campaign file, or use `matchup match --lead`."}
+        return {"error": f"{type(e).__name__}: {e}"}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+    cad = var_cadences(ds)
+    entries = []
+    for v in sorted(ds.data_vars):
+        step, _tol, n, _t0, _t1 = cad.get(v, (None, None, 0, None, None))
+        entries.append({
+            "name": v, "group": "/", "n": n,
+            "units": ds[v].attrs.get("units", ""),
+            "long_name": (ds[v].attrs.get("long_name")
+                          or ds[v].attrs.get("GRIB_name") or ""),
+            "codes": "", "mapped_to": None, "usable": False,
+            "cadence": _fmt_step(step) if step is not None else "-",
+        })
+    out = {"path": (dset.files() or ["?"])[0], "kind": dset.kind,
+           "n_files": len(dset.files()), "model": True, "entries": entries,
+           "grid": f"{ds.sizes['lat']} x {ds.sizes['lon']}"}
+    ds.close()
+    return out
+
+
 def describe_dataset(dset):
     """Inspect the first file of `dset` -> a description for format_vars()."""
+    if dset.role == "model":
+        return describe_model(dset)
     files = dset.files()
     if not files:
         return {"error": f"no files match {dset.paths}"}
@@ -122,7 +178,7 @@ def describe_dataset(dset):
                 "units": var.attrs.get("units", ""),
                 "long_name": (var.attrs.get("long_name")
                               or var.attrs.get("standard_name") or ""),
-                "flags": var.attrs.get("flag_meanings", ""),
+                "codes": _decode_flags(var),
                 # Qualified first: only ku:swh_ocean is read as hs, not c:.
                 "mapped_to": mapped.get(shown, mapped.get(name)
                                         if shown == name else None),
@@ -147,7 +203,7 @@ def _describe_csv(path, dset, n_files):
         name = h.split(" [")[0].strip()
         unit = h.split("[")[1].rstrip("]").strip() if "[" in h else ""
         entries.append({"name": name, "group": "/", "n": 0, "units": unit,
-                        "long_name": "", "flags": "",
+                        "long_name": "", "codes": "",
                         "mapped_to": mapped.get(name), "usable": True})
     return {"path": path, "kind": dset.kind, "n_files": n_files,
             "cloud_dims": ("row",), "axes": {("row",): entries}}
@@ -161,25 +217,47 @@ def format_vars(name, desc, show_all=False, width=78):
         return f"{name}: {desc['error']}"
     import os
     L.append(f"{name}  [{desc['kind']}]  {desc['n_files']} file(s)")
+
+    if desc.get("model"):
+        # Models hide nothing: open_model exposes every field in the files, so
+        # there is no standard-name selection and no extra_vars to offer. The
+        # useful facts are the variable's own output cadence and its units.
+        L.append(f"  grid   : {desc['grid']}")
+        L.append("")
+        L.append(f"  ALL model variables are read  ({len(desc['entries'])})")
+        w = max((len(e["cadence"]) for e in desc["entries"]), default=4) + 1
+        for e in desc["entries"]:
+            head = f"    {e['name']:<14} every {e['cadence']:<{w}}"
+            detail = " ".join(x for x in (e["units"], e["long_name"]) if x)
+            L.extend(_wrap_text(detail[:120], head, width=width) if detail
+                     else [head.rstrip()])
+        L.append("")
+        L.append("  Nothing is withheld for models, so `extra_vars` does not")
+        L.append("  apply -- it exists only for observation products, where each")
+        L.append("  reader selects a few variables out of many.")
+        return "\n".join(L)
+
     L.extend(_wrap_text(os.path.basename(desc["path"]), "  sample : ", width=width))
     L.append(f"  records lie on: {' x '.join(desc['cloud_dims'])}")
 
-    # Column width from the longest tag actually present, with a guaranteed
-    # trailing space: a long standard name (`-> hs_unfiltered`) used to run
-    # straight into the units, reading as 'hs_unfilteredm'.
-    tags = [f"-> {e['mapped_to']}" if e["mapped_to"]
-            else ("extra_vars" if e["usable"] else "")
-            for entries in desc["axes"].values() for e in entries]
-    tagw = max([len(t) for t in tags] + [10]) + 1
-
-    def _fmt(e):
-        tag = (f"-> {e['mapped_to']}" if e["mapped_to"]
-               else ("extra_vars" if e["usable"] else ""))
-        head = f"    {e['name']:<28} {tag:<{tagw}}"
+    # Two labelled blocks, not a tag column. With 65 variables of which 6 are
+    # read, a per-row tag is invisible; a heading that says what the whole
+    # block is can be scanned at a glance.
+    def _fmt(e, tagw):
+        tag = f"-> {e['mapped_to']}" if e["mapped_to"] else ""
+        head = f"    {e['name']:<28} {tag:<{tagw}}" if tagw else f"    {e['name']:<28} "
         detail = " ".join(x for x in (e["units"], e["long_name"]) if x)
-        if not detail:
-            return [head.rstrip()]
-        return _wrap_text(detail[:120], head, width=width)
+        out = _wrap_text(detail[:120], head, width=width) if detail else [head.rstrip()]
+        if e["codes"]:
+            out.extend(_wrap_text(e["codes"], " " * 6 + "values: ", width=width))
+        return out
+
+    def _block(title, entries, tagged):
+        L.append("")
+        L.append(f"  {title}  ({len(entries)})")
+        tagw = (max(len(f"-> {e['mapped_to']}") for e in entries) + 1) if tagged else 0
+        for e in sorted(entries, key=lambda e: e["name"]):
+            L.extend(_fmt(e, tagw))
 
     main = tuple(desc["cloud_dims"])
     for sig, entries in sorted(desc["axes"].items(), key=lambda kv: -len(kv[1])):
@@ -187,18 +265,25 @@ def format_vars(name, desc, show_all=False, width=78):
         if not on_axis and not show_all:
             L.append("")
             L.append(f"  {len(entries)} more variable(s) on {sig} -- a different "
-                     f"rate/axis;")
-            L.append(f"  not usable with extra_vars. Show with --all.")
+                     f"rate/axis, not usable with extra_vars. Show with --all.")
             continue
-        L.append("")
-        L.append(f"  variables on {sig}  ({len(entries)})"
-                 + ("" if on_axis else "   [OTHER AXIS -- needs reader support]"))
-        for e in sorted(entries, key=lambda e: (e["mapped_to"] is None, e["name"])):
-            L.extend(_fmt(e))
-            if e["flags"]:
-                L.extend(_wrap_text(e["flags"][:110], " " * 6 + "flags: ", width=width))
+        if not on_axis:
+            L.append("")
+            L.append(f"  ---- {sig}: a different rate/axis. These need reader "
+                     f"support; ----")
+            L.append(f"  ---- they cannot be added with extra_vars.              "
+                     f"       ----")
+            _block(f"variables on {sig}", entries, tagged=False)
+            continue
+        read = [e for e in entries if e["mapped_to"]]
+        avail = [e for e in entries if not e["mapped_to"]]
+        if read:
+            _block("ALREADY READ, as these standard variables", read, tagged=True)
+        if avail:
+            _block("AVAILABLE -- add any of these with extra_vars", avail, tagged=False)
+
     L.append("")
-    L.append("  '-> name' is already read as that standard variable.")
-    L.append("  'extra_vars' can be added verbatim via the campaign file, e.g.")
-    L.append(f"      {name}: {{..., extra_vars: [<name>, ...]}}")
+    L.append("  To add variables, list them in the campaign file:")
+    L.append(f"      {name}: {{..., extra_vars: [<name>, <name>]}}")
+    L.append("  They arrive as extra `x_<name>` columns, carried through unchanged.")
     return "\n".join(L)

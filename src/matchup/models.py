@@ -276,4 +276,12 @@ def open_model(paths, engine="cfgrib", init=None, lead=None, lead_tol=6.0,
         u, v = ds["u10"], ds["v10"]
         ds["wind_speed"] = np.hypot(u, v)
         ds["wind_dir"] = (270.0 - np.degrees(np.arctan2(v, u))) % 360.0  # met 'from'
+        # xarray propagates u10's attributes through the arithmetic, so the
+        # derived fields would otherwise describe themselves as the U
+        # component. Say what they actually are.
+        ds["wind_speed"].attrs = {"units": "m s**-1",
+                                  "long_name": "10 metre wind speed (from u10, v10)"}
+        ds["wind_dir"].attrs = {"units": "degrees",
+                                "long_name": "10 metre wind direction, "
+                                             "meteorological 'from' (from u10, v10)"}
     return ds.sortby("time")
