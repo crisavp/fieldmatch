@@ -28,32 +28,41 @@ and optional VS Code cells. No JupyterLab setup is required.
 
 ## Run a study
 
-Copy [analyze.py](examples/analyze.py) and [harry.yaml](examples/harry.yaml) into a
-study folder. Edit `data_root` in the YAML to point to your data. The Harry source
-data are not included; [synthetic examples](examples/README.md) need no downloads.
+Copy `examples/analyze.py` and `examples/harry.yaml` into your study folder.
+Edit the YAML's data root and dataset declarations, then run the installed commands:
 
 ```bash
-python /path/to/study/analyze.py inspect
-python /path/to/study/analyze.py run
-python /path/to/study/analyze.py plot
+fieldmatch scan /path/to/study/harry.yaml
+fieldmatch run /path/to/study/harry.yaml --describe
+fieldmatch run /path/to/study/harry.yaml
 ```
 
-- `inspect`: list files and resolved scientific settings.
-- `run`: compute comparisons and save NetCDF, CSV and manifests.
-- `plot`: read validated saved results, print scores and save figures/tables plus
-  an `index.html` gallery you can open in a browser. It does not recompute matches.
-- `plot --show`: also display Matplotlib windows when a graphical backend is available.
+`scan` inventories files and coverage. `run --describe` prints resolved scientific
+choices without computing. `run` executes all declared comparisons and variables,
+saving NetCDF, CSV and manifests. Use `fieldmatch compare` for one named comparison.
 
-The default configuration is `harry.yaml` beside the script. `--config` selects
-another YAML; relative values are resolved **from the script**, not the terminal
-working directory. Data/output paths are resolved **from the YAML**. Nothing
-searches the current directory for a project automatically.
+Set `CONFIG` in `analyze.py` to your YAML's absolute path, then run:
 
-In VS Code, the same script has `# %%` cells. Set its `INTERACTIVE_CONFIG` to an
-absolute YAML path, choose your Python environment in the Interactive Window, and
-run setup → inspect → run → plot. Skip the run cell when adjusting figures.
+```bash
+python /path/to/study/analyze.py
+```
 
-Start with the [complete analysis guide](docs/analysis-guide.md).
+The script only reads saved results, calculates summaries and plots them.
+Set `SHOW = True` to display figures and `SAVE = True` to save figures, tables,
+provenance and an HTML gallery. Either can be disabled independently. For a headless
+terminal use `SHOW = False, SAVE = True` (as two separate Python assignments).
+Display uses your Matplotlib backend; no interactive-window detection is performed.
+
+The same `CONFIG` works in the terminal and VS Code cells. Relative YAML data/output
+paths resolve from the YAML. CLI paths use ordinary shell rules; absolute paths
+work from anywhere. No script arguments or working-directory guessing are involved.
+
+In VS Code, select your installed Python environment and run the two cells in order:
+settings/functions, then load/plot. `tables`, `pairs`, `grids` and `analysis` remain
+available for exploration. No JupyterLab server is required. Comparisons are always
+run separately from the terminal.
+
+See the [complete analysis guide](docs/analysis-guide.md).
 
 ## Scientific choices
 
@@ -95,9 +104,6 @@ fieldmatch vars /path/to/study/harry.yaml analysis
 fieldmatch compare /path/to/study/harry.yaml buoy_analysis --describe
 fieldmatch compare /path/to/study/harry.yaml buoy_analysis --format both
 ```
-
-Unlike the example script's `--config`, a relative positional YAML path passed to
-`fieldmatch` is a normal terminal path. Use an absolute path to invoke it anywhere.
 
 ## Documentation
 

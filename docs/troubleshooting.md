@@ -8,21 +8,12 @@
 - **GRIB C library cannot load:** use `fieldmatch doctor`. In conda, install cfgrib
   and eccodes from conda-forge; for pip environments, supply the native library or
   use the new-conda-environment route. The doctor checks the engine, not every file.
-- **No files:** run the script's `inspect` action. Dataset paths resolve from the
-  YAML's data_root, and data_root resolves from the YAML. An absolute data_root is
-  simplest for a first setup. It must contain the directories used by the globs.
-- **Script runs from one directory but not another:** use an absolute script path.
-  Its `--config` is script-relative; `fieldmatch` CLI positional paths are ordinary
-  shell-relative paths. Interactive config paths must be absolute.
-- **Interactive config missing:** set `INTERACTIVE_CONFIG` in analyze.py and rerun
-  the setup cell. The script intentionally does not guess a project directory.
-- **VS Code uses another Python:** select the installed environment as the
-  Interactive Window kernel. Install `.[interactive]` there. A working terminal
-  environment does not automatically mean the editor selected the same kernel.
-- **No GUI windows:** plain `plot` saves PNG/HTML without a display. `--show` needs a
-  graphical Matplotlib backend. In VS Code use the interactive plot cell instead.
-
-## Scientific configuration
+- **No files:** run `fieldmatch scan campaign.yaml`; check YAML-relative data paths.
+- **Plot configuration:** set `CONFIG` to the absolute YAML path in the script.
+- **No GUI windows:** set `SHOW = True` and use a graphical Matplotlib backend, or
+  VS Code's inline display. For headless saving use `SHOW = False, SAVE = True`
+  as separate assignments.
+- **Missing/stale results:** run `fieldmatch run campaign.yaml` before plotting.
 
 Use `fieldmatch vars /absolute/path/to/config.yaml dataset` to inspect source
 variables and `fieldmatch compare ... comparison --describe` for resolved choices.

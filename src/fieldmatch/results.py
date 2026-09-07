@@ -38,3 +38,37 @@ def open_result(path):
     ds.attrs['result_source']=str(path.resolve())
     ds.attrs['result_sha256']=_file_sha256(path)
     return ds
+
+
+def open_campaign_results(campaign):
+    """Load only this campaign's declared quantities; validate each saved result."""
+    records = {}
+    for file in campaign.outdir.glob('*.manifest.json'):
+        record = json.loads(file.read_text())
+        effective = record.get('effective', {})
+        if effective.get('campaign') != campaign.name:
+            continue
+        key = (effective.get('comparison'), effective.get('variable'))
+        if key in records:
+            raise ValueError(f'Multiple result manifests for {key}; use a separate output folder per study.')
+        records[key] = record
+    loaded = {}
+    for name, declaration in campaign.comparisons.items():
+        for variable in declaration['variables']:
+            record = records.get((name, variable))
+            if record is None or record['status'] != 'complete':
+                raise ValueError(f'No complete {name}/{variable} result. Run comparisons first.')
+            # Validate against the currently selected campaign too, not just the
+            # campaign path embedded in an output made with a different YAML.
+            from fieldmatch.campaign import pair_digest
+            first = declaration.get('obs', declaration.get('reference'))
+            if record.get('pair_digest') != pair_digest(campaign, first, declaration['model']):
+                raise ValueError(f'{name}/{variable}: current configuration differs; rerun comparisons.')
+            output = record.get('outputs', {}).get('netcdf')
+            if output is None:
+                raise ValueError(f'{name}/{variable} needs NetCDF; run with both formats.')
+            loaded[(name, variable)] = open_result(output)
+    if not loaded:
+        raise ValueError('No declared results to plot.')
+    return loaded
+

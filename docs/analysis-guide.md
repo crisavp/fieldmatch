@@ -21,37 +21,21 @@ For the Harry template, data_root contains `buoys/` and `models/`. The supplied
 raw data are not distributed with the library. On a new study, replace the dataset
 paths, reader kinds, positions, region and period as needed.
 
-**Path rules:**
-
-| Path | Resolved relative to |
-|---|---|
-| Default script configuration, `harry.yaml` | The script file's directory |
-| Script `--config relative/path.yaml` | The script file's directory |
-| YAML `data_root` and `outdir` | The YAML file's directory |
-| Dataset `path` | The resolved data_root |
-| Interactive configuration | Must be an explicit absolute path |
-
-No application path falls back to the working directory. You still need to tell
-Python where the script itself is, using its absolute path when running elsewhere.
-A positional YAML path passed directly to the package CLI (`fieldmatch scan ...`)
-is a normal shell-relative path; absolute YAML paths work from anywhere.
+Set the plotting script's `CONFIG` to the absolute YAML path. This same setting
+is used in terminal execution and cells. YAML `data_root` and `outdir` resolve
+relative to the YAML; dataset paths resolve from data_root. CLI paths follow shell
+rules, so use absolute paths when invoking commands from elsewhere.
 
 ## 2. Inspect before running
 
 ```bash
-python /path/to/study/analyze.py inspect
-```
-
-This prints the configuration location, resolved output folder, file counts and
-complete effective comparison settings. It does not match or plot data. For a
-more detailed coverage/variable inventory:
-
-```bash
 fieldmatch scan /path/to/study/harry.yaml
-fieldmatch vars /path/to/study/harry.yaml ba08
+fieldmatch run /path/to/study/harry.yaml --describe
 fieldmatch vars /path/to/study/harry.yaml analysis
-fieldmatch vars /path/to/study/harry.yaml aifs18 --all
 ```
+
+Scan inventories data; describe prints all effective comparison settings without
+running comparisons.
 
 Names such as `analysis` and `ba08` are YAML keys, not built-in aliases. Check units,
 all reported time cadences, forecast initialization and sensor coordinates. A zero
@@ -102,7 +86,7 @@ has no pp1d/tp. Add variables only where the physical quantity exists.
 ## 4. Compute and save comparisons
 
 ```bash
-python /path/to/study/analyze.py run
+fieldmatch run /path/to/study/harry.yaml
 ```
 
 This runs every declared quantity and saves both NetCDF and CSV with manifests.
@@ -121,84 +105,50 @@ separate experiments.
 
 ## 5. Print scores and see the figures
 
-```bash
-python /path/to/study/analyze.py plot
+Set the following near the top of your copied script:
+
+```python
+CONFIG = Path('/absolute/path/to/study/harry.yaml')
+SHOW = True
+SAVE = True
 ```
 
-This reads and validates saved results. It does not load raw model files or rerun
-matching. It explicitly intersects observation IDs within each station/quantity
-group, prints scores, and saves under `<outdir>/figures/`:
-
-- common-sample counts, full scores and an optional observed Hs ≥6 m subset;
-- station time-series and scatter panels;
-- grid difference summaries and reference/candidate/difference panels;
-- `index.html`, an ordinary browser gallery with tables and images;
-- figure provenance JSON sidecars.
-
-The terminal prints the full gallery path. Open that file in a browser; no web
-server is needed. For Matplotlib windows on a desktop:
+Then run:
 
 ```bash
-python /path/to/study/analyze.py plot --show
+python /path/to/study/analyze.py
 ```
 
-Window display requires a graphical Matplotlib backend. On a server/headless
-machine, omit `--show` and open the saved images or HTML on your desktop.
+The script validates saved results, explicitly intersects observation IDs within
+each station/quantity group, prints scores and plots. It never runs comparisons.
+`SHOW` controls display through Matplotlib; `SAVE` controls all writes (PNG,
+provenance JSON, score/count CSV and HTML gallery under `<outdir>/figures`).
+Use `SHOW = False` on a headless machine. Use `SAVE = False` for display only.
+Both flags are ordinary Python settings, identical in terminal and cell execution.
 
-Edit `MAP_TIME`, `FIELD_LIMITS`, `DIFFERENCE_LIMITS` and `SEVERE_HS` near the top of
-the script for figure/analysis choices. Re-run `plot`, not `run`, after those edits.
-You can also select the map time for one invocation:
-
-```bash
-python /path/to/study/analyze.py plot --time 2026-01-20T12:00
-```
-
-Map times must exist exactly; the script refuses to substitute a nearby time.
-Field colour limits are shared and differences are symmetric. Reusing a figure
-name overwrites that figure; choose another output study if you need both versions.
+Edit `MAP_TIME`, `FIELD_LIMITS`, `DIFFERENCE_LIMITS` and `SEVERE_HS` for analysis
+choices, then rerun the script. Map times must exist exactly. Changing scientific
+matching choices in YAML requires `fieldmatch run` again. Saved figure names are
+overwritten when you redraw; comparison files are not modified by plotting.
 
 ## 6. Optional VS Code interactive inspection
 
-Install `.[interactive]` in your chosen environment and enable VS Code's Python
-and Jupyter extensions. Choose that environment as the Interactive Window kernel.
-You do not need to install or launch JupyterLab.
+Install `.[interactive]`, enable VS Code's Python and Jupyter extensions, and select
+your installed environment as the Interactive Window kernel. No JupyterLab server
+is needed. Run the settings/functions cell, then the load/plot cell. The script
+contains no environment detection, argument parsing or alternate interactive path.
+`CONFIG` is the same explicit absolute path for both ways of running it.
 
-Open your copied `analyze.py`. Set the one interactive path in its setup cell:
-
-```python
-INTERACTIVE_CONFIG = Path('/absolute/path/to/study/harry.yaml')
-```
-
-Then use **Run Cell**, in order:
-
-1. **Setup:** imports, settings and functions. Edit settings here; rerun this cell
-   after changing them.
-2. **Inspect:** defines `campaign` and shows resolved choices.
-3. **Run comparisons:** only when results do not exist or scientific settings changed.
-4. **Plot and inspect:** loads results, displays figures and defines `analysis`,
-   `tables`, `pairs` and `grids` for further exploration.
-
-If you already ran the terminal sequence, skip cell 3. Avoid Run All/Run Above
-through cell 3 when you only want to redraw. An explicit path is required even if
-your editor happens to provide `__file__`; this avoids relying on editor-specific
-working directories or persistent kernel state.
-
-Add your own cells below. The setup and inspection cells provide `campaign`,
-NumPy and pandas. Output paths should use `campaign.outdir`, never a bare relative
-filename. A useful first inspection:
+Inspect `tables`, `pairs`, `grids`, `analysis` and `campaign`, or add cells below:
 
 ```python
-# After the plot cell:
 print(tables.keys())
-print(pairs.keys())
-print(grids.keys())
 station = pairs[('ba08', 'hs')]['buoy_analysis']
 print(station[['time', 'model_time', 'dt', 'hs', 'model_hs']].to_dataframe().head())
 ```
 
-`time` is the observation time; `model_time` is the actual sampled model valid time.
-`dt = observation − model time`, in seconds. Positive dt means an earlier model
-value was used. The source arrays, initialization/lead and metadata remain inspectable.
+`time` is observation time; `model_time` is sampled model time;
+`dt = observation − model time` in seconds. Positive dt means an earlier model.
 
 ## 7. Extend the scientific analysis
 

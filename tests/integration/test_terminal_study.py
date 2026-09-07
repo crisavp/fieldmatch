@@ -33,40 +33,57 @@ def study(tmp_path):
     (home/'harry.yaml').write_text(yaml.safe_dump(config));return home
 
 
-def command(home,cwd,*args):
+def command(home, cwd, *args):
     env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'MPLCONFIGDIR':str(cwd/'mpl')}
-    return subprocess.run([sys.executable,str(home/'analyze.py'),*args],cwd=cwd,env=env,text=True,capture_output=True)
+    return subprocess.run([sys.executable,'-m','fieldmatch.cli',*args],cwd=cwd,env=env,text=True,capture_output=True)
 
 
 def test_whole_sequence_from_unrelated_directory_and_plot_never_reruns(tmp_path):
     pytest.importorskip('matplotlib')
     home=study(tmp_path)
-    for action in ['inspect','run']:
-        result=command(home,tmp_path,action);assert result.returncode==0,result.stderr+result.stdout
+    for args in [('scan',str(home/'harry.yaml')),('run',str(home/'harry.yaml'),'--describe')]:
+        result=command(home,tmp_path,*args);assert result.returncode==0,result.stderr+result.stdout
+    assert not list((home/'output').glob('*.nc'))
+    result=command(home,tmp_path,'run',str(home/'harry.yaml'))
+    assert result.returncode==0,result.stderr+result.stdout
     snapshots={p.name:p.read_bytes() for p in (home/'output').glob('*') if p.is_file()}
-    result=command(home,tmp_path,'plot');assert result.returncode==0,result.stderr+result.stdout
+    script=home/'analyze.py'
+    script.write_text(script.read_text().replace("/absolute/path/to/study/harry.yaml",str(home/'harry.yaml')).replace('SHOW = True','SHOW = False'))
+    env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'MPLCONFIGDIR':str(tmp_path/'mpl')}
+    result=subprocess.run([sys.executable,str(script)],cwd=tmp_path,env=env,text=True,capture_output=True)
+    assert result.returncode==0,result.stderr+result.stdout
     assert (home/'output/figures/index.html').exists()
     assert len(list((home/'output/figures').glob('*.png')))==3
     assert not (tmp_path/'output').exists()
     assert snapshots=={p.name:p.read_bytes() for p in (home/'output').glob('*') if p.is_file()}
-    result=command(home,tmp_path,'inspect','--config','harry.yaml');assert result.returncode==0,result.stderr
-    result=command(home,tmp_path,'plot','--time','2026-01-20T18:01');assert result.returncode!=0 and 'not an exact' in result.stderr
+    from fieldmatch.campaign import load_campaign
+    from fieldmatch.results import open_campaign_results
     changed=yaml.safe_load((home/'harry.yaml').read_text());changed['matching_defaults']={'tolerance_minutes':0}
     (home/'other.yaml').write_text(yaml.safe_dump(changed))
-    result=command(home,tmp_path,'plot','--config','other.yaml')
-    assert result.returncode!=0 and 'configuration differs' in result.stderr
+    with pytest.raises(ValueError,match='configuration differs'):
+        open_campaign_results(load_campaign(home/'other.yaml'))
 
 
-def test_interactive_path_is_explicit_without_file_or_working_directory(tmp_path):
+def test_plain_cells_without_file_or_detection_and_show_without_writes(tmp_path,monkeypatch):
+    pytest.importorskip('matplotlib')
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
     home=study(tmp_path)
-    setup=(home/'analyze.py').read_text().split('# %% Inspect —')[0]
-    # Simulate the first VS Code cell: __name__ is __main__, no __file__, kernel args irrelevant.
-    namespace={'__name__':'__main__','get_ipython':lambda:object()}
-    exec(compile(setup,'<interactive setup>','exec'),namespace)
-    resolve=namespace['config_path']
-    for value in [None,'harry.yaml']:
-        with pytest.raises(ValueError,match='absolute path'):resolve(value,interactive=True)
-    assert resolve(home/'harry.yaml',interactive=True)==home/'harry.yaml'
+    result=command(home,tmp_path,'run',str(home/'harry.yaml'))
+    assert result.returncode==0,result.stderr
+    script=(home/'analyze.py').read_text().replace('/absolute/path/to/study/harry.yaml',str(home/'harry.yaml')).replace('SAVE = True','SAVE = False')
+    assert 'get_ipython' not in script and '__file__' not in script and 'argparse' not in script
+    calls=[]
+    monkeypatch.setattr(plt,'show',lambda:calls.append(True))
+    namespace={'__name__':'__main__'}
+    exec(compile(script,'<cells>','exec'),namespace)
+    assert calls==[True]
+    assert len(namespace['analysis']['figures'])==3
+    assert not (home/'output/figures').exists()
+    with pytest.raises(ValueError,match='not an exact'):
+        namespace['plot'](namespace['campaign'],show=False,save=False,map_time='2026-01-20T18:01')
+    plt.close('all')
 
 
 def test_installer_existing_uses_active_python_and_new_never_updates(tmp_path):

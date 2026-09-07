@@ -1,3 +1,9 @@
+## 0.4.1
+
+- Installed `fieldmatch run` executes all declared comparisons; `--describe` shows resolved choices.
+- The example script only loads results and plots, with explicit CONFIG, SHOW and SAVE settings and no execution-environment detection.
+- Result discovery and validation now live in `open_campaign_results`.
+
 # 0.4.0 — Terminal-first, portable study example
 
 - Replace the primary .ipynb example with analyze.py: inspect, run and plot actions,

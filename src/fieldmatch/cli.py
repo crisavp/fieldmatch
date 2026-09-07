@@ -112,6 +112,32 @@ def compare(
     if failures: raise typer.Exit(1)
 
 
+@app.command()
+def run(
+    campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
+    format: str = typer.Option("both", "--format", help="csv, netcdf or both (default)."),
+    describe: bool = typer.Option(False, "--describe", help="Show all resolved settings without computing."),
+):
+    """Run all named comparisons and variables declared in the campaign YAML."""
+    import json
+    from .campaign import load_campaign
+    from .comparison import resolve_comparisons, run_comparisons
+    camp = load_campaign(campaign)
+    formats = _formats(format)
+    try:
+        specs = [spec for name in camp.comparisons for spec in resolve_comparisons(camp, name)]
+        if not specs:
+            raise ValueError("Declare at least one named comparison in the YAML.")
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if describe:
+        print(json.dumps(specs, indent=2, default=str))
+        return
+    _, failures = run_comparisons(camp, specs, formats=formats)
+    if failures:
+        raise typer.Exit(1)
+
+
 def _open_pairs(path):
     """Open a portable FieldMatch CSV or NetCDF as an xarray Dataset."""
     path = Path(path)

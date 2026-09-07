@@ -2,30 +2,39 @@
 
 ## Terminal-first real-data study
 
-Copy `analyze.py` and `harry.yaml` into a study folder. Edit the YAML's data_root
-once, then use:
+Copy `examples/analyze.py` and `examples/harry.yaml` into your study folder.
+Edit the YAML's data root and dataset declarations, then run the installed commands:
 
 ```bash
-python /path/to/study/analyze.py inspect
-python /path/to/study/analyze.py run
-python /path/to/study/analyze.py plot
+fieldmatch scan /path/to/study/harry.yaml
+fieldmatch run /path/to/study/harry.yaml --describe
+fieldmatch run /path/to/study/harry.yaml
 ```
 
-The default YAML is beside the script. An explicit `--config` can be absolute or
-relative to the script; it never depends on the terminal working directory.
-Data and output paths resolve from the YAML. Plotting reads saved results and
-writes a browser gallery, images, tables and figure sidecars under `<outdir>/figures`.
-`plot --show` also displays figures when a graphical backend is available.
+`scan` inventories files and coverage. `run --describe` prints resolved scientific
+choices without computing. `run` executes all declared comparisons and variables,
+saving NetCDF, CSV and manifests. Use `fieldmatch compare` for one named comparison.
 
-The same script contains VS Code `# %%` cells. Install `.[interactive]`, select
-your installed environment, and set `INTERACTIVE_CONFIG` to an absolute YAML path.
-Run setup → inspect → run → plot; skip the run cell to reuse existing comparisons.
-The returned `tables`, `pairs` and `grids` can be inspected or used in further cells.
-No JupyterLab server is needed. See the [analysis guide](../docs/analysis-guide.md).
+Set `CONFIG` in `analyze.py` to your YAML's absolute path, then run:
 
-This script is intentionally editable study code, not another configuration
-framework. It makes common-sample grouping and the optional severe-Hs threshold
-visible. Adapt its analysis choices when the scientific question changes.
+```bash
+python /path/to/study/analyze.py
+```
+
+The script only reads saved results, calculates summaries and plots them.
+Set `SHOW = True` to display figures and `SAVE = True` to save figures, tables,
+provenance and an HTML gallery. Either can be disabled independently. For a headless
+terminal use `SHOW = False, SAVE = True` (as two separate Python assignments).
+Display uses your Matplotlib backend; no interactive-window detection is performed.
+
+The same `CONFIG` works in the terminal and VS Code cells. Relative YAML data/output
+paths resolve from the YAML. CLI paths use ordinary shell rules; absolute paths
+work from anywhere. No script arguments or working-directory guessing are involved.
+
+In VS Code, select your installed Python environment and run the two cells in order:
+settings/functions, then load/plot. `tables`, `pairs`, `grids` and `analysis` remain
+available for exploration. No JupyterLab server is required. Comparisons are always
+run separately from the terminal.
 
 ## Synthetic smoke test (no external data)
 
