@@ -1,135 +1,105 @@
 # FieldMatch
 
-FieldMatch reads observations and gridded model fields, matches **one physical
-quantity per result**, and saves the pairs with their scientific settings.
-A batch can request several quantities; each has independent accepted rows,
-model times, and a CSV/NetCDF output. Basic statistics are a separate step.
+FieldMatch compares observations with model fields, or one model with another,
+with explicit scientific choices. Each physical quantity has its own result.
+Optional plotting functions draw prepared results without matching or regridding.
+
+## Start your own analysis
+
+**Start with [Your first complete analysis](docs/analysis-guide.md).** It walks
+through copying the Harry example, setting paths, inspecting data, configuring
+comparisons, checking results, selecting common observations and making figures.
+It also covers storm subsets, sensitivity experiments and saving a reproducible study.
+
+- [Harry notebook](examples/harry_exploration.ipynb): run and adapt the example.
+- [Harry campaign](examples/harry_campaign.yaml): datasets and comparison choices.
+- [Troubleshooting](docs/troubleshooting.md): setup, matching, stale results and figures.
+
+From an activated environment, in this repository:
 
 ```bash
-conda activate wave-models2  # or your installation environment
-fieldmatch scan harry.yaml
-fieldmatch vars harry.yaml ecmwf_an
-fieldmatch collocate harry.yaml buoy_ba08 ecmwf_an --variable hs
-fieldmatch stats matchup_out/harry_buoy_ba08_x_ecmwf_an_hs.csv
+python -m pip install -e '.[notebook]'
+fieldmatch doctor
+python -m jupyterlab examples/harry_exploration.ipynb
 ```
 
-To run Hs and wind together, repeat `--variable`. Adding wind never removes
-an Hs pair:
+The Harry data are not bundled. Set the notebook's `DATA_ROOT` and `OUTPUT` before
+running it. The current Harry workspace uses conda `wave-models2`; a fresh
+installation from `environment.yml` uses conda `fieldmatch`. Install `.[plot]`
+for Matplotlib only, or `pip install -e .` for the numerical core without plotting.
+
+## The usual workflow
 
 ```bash
-fieldmatch collocate harry.yaml buoy_ba08 ecmwf_an \
-  --variable hs --variable wind_speed --format both
+fieldmatch scan your_campaign.yaml
+fieldmatch vars your_campaign.yaml analysis
+fieldmatch compare your_campaign.yaml buoy_analysis --describe
+fieldmatch compare your_campaign.yaml buoy_analysis --format both
 ```
 
-The default is nearest model time within **30 minutes**, bilinear spatial
-interpolation, no spatial extrapolation, and rejection of missing contributing
-corners. The nearest-time tie goes to the earlier model step. Directions use
-circular/vector interpolation; undefined directions remain missing. Zero
-time tolerance explicitly requests exact timestamps.
+`analysis` and `buoy_analysis` are names defined in your YAML, not built-in names.
+The example campaign contains those names. The notebook uses the same runner and
+can execute every named comparison in a batch.
 
-All effective defaults, overrides, source mappings, units, reader/QC provenance,
-input/source-code checksums and accepted/rejected counts are saved in the
-adjacent manifest. CSV needs this manifest to carry its metadata. Console output
-shows the resolved specification before matching.
-
-## Explicit campaigns
-
-Keep dataset declarations and put the scientific choices in the YAML:
+Shared choices go under `matching_defaults`. A comparison groups variables, each
+with optional settings directly below its name:
 
 ```yaml
-datasets:
-  ecmwf_an:
-    kind: grib
-    path: "models/analysis/*.grib"
-    rename: {pp1d: tp}
-  # Add the buoy_ba08 observation dataset here.
-
+# Fragment inside an existing campaign; see the complete Harry template.
 matching_defaults:
   tolerance_minutes: 30
-  time_tie: earlier
   space_method: bilinear
 
 comparisons:
-  peak_period:
-    obs: buoy_ba08
-    model: ecmwf_an
+  buoy_analysis:
+    obs: ba08
+    model: analysis
     variables:
       hs: {}
-      tp: {}
-```
-
-```bash
-fieldmatch compare harry.yaml peak_period --describe
-fieldmatch compare harry.yaml peak_period
-```
-
-`pp1d` is peak period. ECMWF `mwp` is energy mean period, not buoy `tm01` or
-`tm02`; FieldMatch checks known quantity identities and units. Neutral
-wave-forcing wind and atmospheric wind also remain distinct.
-
-## Installation and runnable example
-
-```bash
-python -m pip install -e .
-fieldmatch doctor
-python examples/create_demo_data.py
-fieldmatch collocate examples/minimal_campaign.yaml altimeter model --variable hs
-fieldmatch stats examples/results/demo_altimeter_x_model_hs.csv
-```
-
-Optional plotting: `python -m pip install -e '.[plot]'`, then `stats --scatter`.
-Supported observations: CMEMS altimetry, Sentinel-3/6 altimetry, Sentinel-1 OWI,
-ASCAT, and ISPRA buoy CSV. Models: rectilinear GRIB or NetCDF.
-
-## Model differences and figures
-
-Keep grid comparisons in the same campaign:
-
-```yaml
-comparisons:
+      tp: {tolerance_minutes: 0}
   analysis_era5:
-    reference: analysis       # Defines the grid; difference = ERA5 minus analysis.
+    reference: analysis
     model: era5
-    time_basis: valid_time    # Or same_init / same_lead, at exact shared valid times.
+    time_basis: valid_time
     variables:
-      hs: {space_method: bilinear}
+      hs: {}
 ```
 
-```bash
-fieldmatch compare campaign.yaml analysis_era5 --describe
-fieldmatch compare campaign.yaml analysis_era5 --format both
-```
+`hs: {}` inherits the defaults. In this illustrative period experiment, `tp`
+requires exact timestamps. Source-name mappings such as `pp1d: tp` belong in the
+model dataset's `rename` mapping. Distinct period/wind definitions are not aliases.
 
-Grid output defaults to NetCDF (fields, differences, mask and forecast coordinates).
-For grids, CSV means per-time area-weighted difference summaries, not a flat grid.
-The observation command retains its CSV default. A model reference is not truth.
+## What is explicit
 
-```python
-from fieldmatch.results import open_result
-from fieldmatch.plotting import comparison_panels, save_figure
+- **Observation/model:** nearest valid time within a declared tolerance; bilinear
+  or nearest spatial sampling. Missing wind never removes an accepted Hs pair.
+- **Model/model:** exact shared valid times on the declared reference grid, with
+  optional equal-initialization/lead restrictions. Difference = model minus reference.
+- **Spatial behavior:** no extrapolation or automatic coastal filling. Directions
+  use circular interpolation; atmospheric wind uses components where available.
+- **Fair samples:** `common_sample` intersects observation IDs when you request it;
+  plotting does not silently choose a different sample.
+- **Provenance:** results record effective settings, mappings, units, source hashes,
+  forecast coordinates and acceptance/mask information. Keep their manifests.
 
-result = open_result("comparison.nc")
-fig, axes = comparison_panels(result, "2026-01-20T18:00", clim=(0, 10), difference_limit=2)
-save_figure(fig, "storm.png")  # also writes storm.png.figure.json
-```
+Observation comparisons default to CSV. Grid comparisons default to NetCDF;
+their CSV contains spatial summaries, not the full fields. Use `--format both`
+when you want both. Repeating a comparison replaces its outputs. Changing a
+campaign currently requires rerunning its comparisons before provenance validation.
 
-Install `.[notebook]` for Jupyter and open
-[the Harry notebook](examples/harry_exploration.ipynb). Edit its data folder and
-settings, then run the cells. [Grid and plotting guide](docs/grids-and-plotting.md)
-explains the scientific choices and limits. The core has no plotting dependency.
+## Reference pages
 
-## Documentation
+| Page | Use it for |
+|---|---|
+| [Analysis guide](docs/analysis-guide.md) | A complete self-guided study |
+| [Campaign reference](docs/campaign-reference.md) | YAML keys, defaults, readers, initialization and lead |
+| [Output formats](docs/output-formats.md) | Pair columns, grid masks, summaries and manifests |
+| [Grid and plotting guide](docs/grids-and-plotting.md) | Python functions, time bases, weighting and figure options |
+| [Examples](examples/README.md) | Synthetic smoke test and lower-level Python workflows |
+| [Troubleshooting](docs/troubleshooting.md) | Common errors and their meaning |
+| [Contributing](CONTRIBUTING.md), [testing](docs/testing.md), [adding readers](docs/adding-readers.md) | Library development |
 
-- [Campaign reference](docs/campaign-reference.md): selection, matching and named comparisons.
-- [Output formats and migration](docs/output-formats.md): independent quantity tables and provenance.
-- [Python examples](examples/README.md): shared runner and common samples.
-- [Adding readers](docs/adding-readers.md), [testing](docs/testing.md), [contributing](CONTRIBUTING.md).
-
-Version 0.2 changes output filenames to include the quantity and requires an
-explicit CLI variable. Nearest-lead fallback and shortest-lead overlap selection
-are now opt-in. See the migration notes before updating a downstream reader.
-
-Configuration migration: rename top-level `matching` to `matching_defaults`; replace
-comparison `variable: hs` with `variables: {hs: {}}`. Move comparison matching
-settings directly under that variable and model source mappings into dataset
-`rename`. The previous configuration spelling is rejected to keep one clear schema.
+Version 0.3 adds grid comparisons and plotting while retaining the 0.2 observation
+workflow. For older configurations, use `matching_defaults` and a `variables`
+mapping, and include the quantity in downstream output filenames. See
+[migration notes](docs/output-formats.md#migration-from-01) and [history](HISTORY.md).

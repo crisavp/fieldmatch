@@ -1,5 +1,9 @@
 # FieldMatch examples
 
+For your first real study, follow [Your first complete analysis](../docs/analysis-guide.md).
+Copy the Harry notebook and YAML to your own study folder before editing them.
+The sections below cover synthetic checks and additional API examples.
+
 ## Runnable synthetic campaign
 
 Generate three synthetic observations and a tiny model grid:

@@ -1,4 +1,4 @@
-# Output formats and version 0.2 migration
+# Output formats and provenance
 
 One quantity per pair table. A batch has independent tables; missing wind or a
 different wind timestamp cannot remove valid Hs observations.
@@ -21,7 +21,7 @@ refer to the original files before region/time cropping.
 
 ## CSV and NetCDF
 
-CSV is default: ISO timestamps, explicit `NaN`, full double-precision decimal
+For observation/model comparisons, CSV is default: ISO timestamps, explicit `NaN`, full double-precision decimal
 formatting (`%.17g`). NetCDF is available with `--format netcdf` or `both`.
 Strings are not compressed as NetCDF variable-length strings. Numeric variables
 are compressed. The formats derive from exactly the same pair Dataset.
@@ -100,3 +100,12 @@ input hashes, effective settings, source grids and source-code hashes.
 Use `fieldmatch.results.open_result` to validate and load portable NetCDF or
 observation-pair CSV. Figure sidecars (`.figure.json`) preserve result-file hashes,
 comparison metadata, plot limits, axes and the figure checksum.
+
+## Reuse and portability
+
+Changing any comparison declaration can invalidate existing results from the
+same campaign; rerun all its comparisons or keep separate campaign versions.
+Reusing only plots (`RUN_COMPARISONS = False` in the Harry notebook) is appropriate
+when scientific inputs/settings are unchanged. A figure sidecar identifies its
+source result and display settings; keep the analysis code as well to document
+additional sample selection and custom plotting.

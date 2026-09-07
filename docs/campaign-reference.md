@@ -1,5 +1,8 @@
 # Campaign reference
 
+For a guided workflow, start with [Your first complete analysis](analysis-guide.md).
+This page lists the configuration contract.
+
 Required: `campaign`, `region`, `period`, `datasets`. Optional: `data_root`,
 `outdir`, `matching_defaults`, `comparisons`. Unknown keys are errors. Paths resolve
 relative to the campaign file; a relative dataset path is under `data_root`.
@@ -126,8 +129,9 @@ Scalar and dimensional forecast steps must satisfy valid time = init + lead.
 Same-variable time partitions combine without silently overriding later values.
 Conflicting finite overlaps, units, grids or cross-variable provenance fail;
 complementary missing cells and identical repeated values may combine.
-Only rectilinear 1-D latitude/longitude grids are supported. Regridding is an
-explicit external operation, not an automatic part of assembling files.
+Only rectilinear 1-D latitude/longitude grids are supported. Loading files does
+not reconcile incompatible grids. Explicit model-to-model regridding is available
+through the grid comparison workflow below.
 
 Configuration migration: rename top-level `matching` to `matching_defaults`; replace
 comparison `variable: hs` with `variables: {hs: {}}`. Move comparison matching
@@ -150,3 +154,11 @@ settings come from `matching_defaults`; its observation time settings do not
 apply. Variable-level time-tolerance settings on a grid group are rejected.
 `compare --describe` shows the exact effective rules. See
 [grid and plotting guide](grids-and-plotting.md) for examples.
+
+## Editing an existing campaign
+
+Add definitions inside the existing mappings; do not duplicate YAML root keys.
+Duplicate keys are not currently rejected by the parser. After any campaign edit,
+rerun its comparisons: freshness fingerprints include all comparison declarations,
+not only the group being read. Use a separate campaign/output folder to preserve
+an earlier experiment. See the [sensitivity recipe](analysis-guide.md#9-test-a-scientific-decision-without-losing-the-original).

@@ -1,5 +1,9 @@
 # Explicit model comparisons and reusable figures
 
+For runnable steps from raw Harry data, use the [analysis guide](analysis-guide.md).
+The snippets here illustrate the Python API; model datasets/result paths must
+already exist.
+
 FieldMatch 0.3 keeps scientific preparation in the core and plotting in an
 optional module in the same package. Harry-specific experiment selection lives
 in the example notebook and YAML, not in the core.
@@ -94,3 +98,18 @@ The legacy `stats --scatter` command remains compatible. For new figures, use th
 plotting module or the Harry notebook. Install `.[plot]` for Matplotlib only,
 or `.[notebook]` for the Jupyter workflow. Plotting libraries are not imported by
 the numerical core.
+
+## Plot function quick reference
+
+| Function | Input and useful options | Returns |
+|---|---|---|
+| `field_map(ds, time, ...)` | Prepared grid result; `field` is reference/candidate/difference; `clim`, `cmap`, `title`, `ax` | `(fig, ax)` |
+| `comparison_panels(ds, time, ...)` | Prepared grid result; `clim` shared between fields, `difference_limit`, `figsize` | `(fig, axes)` |
+| `time_series(tables, ...)` | Label-to-pair-dataset mapping for one station on identical observations; `connect`, `title`, `ax` | `(fig, ax)` |
+| `scatter(ds, ...)` | One prepared observation/model result; `title`, `ax` | `(fig, ax)` |
+| `save_figure(fig, path, ...)` | File extension selects PNG/PDF/SVG; `dpi` defaults to 180 | Saved `Path` and adjacent JSON sidecar |
+
+Use `ax.set(...)` and ordinary Matplotlib layouts for further customization. The
+helpers infer the variable from the result metadata; choose correct physical
+units and limits for the new variable. Extra analysis filters belong in your
+notebook/script and are not fully reconstructed from a figure sidecar.
