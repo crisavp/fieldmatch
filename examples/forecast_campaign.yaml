@@ -1,0 +1,20 @@
+# Template: replace paths and region/period with a real forecast study.
+campaign: forecast_example
+data_root: /path/to/study
+outdir: ./results
+region: {lonmin: 8, lonmax: 18, latmin: 34, latmax: 44}
+period: [2026-01-15, 2026-01-22]
+
+datasets:
+  buoy:
+    kind: buoy_ispra
+    path: observations/buoy_*.csv
+    lat: 38.5
+    lon: 9.0
+  forecast:
+    kind: grib
+    path: forecasts/forecast_*.grib
+
+# Examples:
+#   fieldmatch collocate examples/forecast_campaign.yaml buoy forecast --variable hs --lead 24
+#   fieldmatch collocate examples/forecast_campaign.yaml buoy forecast --variable hs --lead 12-35

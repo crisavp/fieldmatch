@@ -1,0 +1,23 @@
+# Template showing reader choices and pass-through source variables.
+campaign: extra_variables
+data_root: /path/to/study
+outdir: ./results
+region: {lonmin: -8, lonmax: 36, latmin: 26, latmax: 45}
+period: [2026-01-15, 2026-01-22]
+
+datasets:
+  sentinel3:
+    kind: altimeter_s3
+    path: observations/S3/**/*_RED_*.nc
+    retracker: sar
+    min_dist_coast_km: 30
+    open_ocean_only: true
+    extra_vars: [rain_flag_01_ku, dist_coast_01]
+  model:
+    kind: netcdf
+    path: model/*.nc
+    coords: {valid_time: time, latitude: lat, longitude: lon}
+    rename: {significant_wave_height: hs}
+
+# Inspect exact source names and axes before editing extra_vars:
+#   fieldmatch vars examples/extra_variables_campaign.yaml sentinel3 --all

@@ -1,21 +1,22 @@
 # Storm Harry, western/central Med, 16-22 Jan 2026.
 # Usage:
-#   matchup scan   config/campaigns/harry.yaml
-#   matchup match  config/campaigns/harry.yaml jason3 ecmwf_an
-#   matchup cstats config/campaigns/harry.yaml jason3 ecmwf_an
+#   fieldmatch scan      config/campaigns/harry.yaml
+#   fieldmatch collocate config/campaigns/harry.yaml jason3 ecmwf_an
+#   fieldmatch stats     /path/to/output.csv
 campaign: harry
 data_root: /home/valladca/WAVEWATCH/harry_storm/data
-outdir: /home/valladca/WAVEWATCH/harry_storm/matchup_out
+outdir: /home/valladca/WAVEWATCH/harry_storm/fieldmatch_out
 
 region: {lonmin: -8, lonmax: 36, latmin: 26, latmax: 45}   # = ECMWF grib domain
-period: [2026-01-15, 2026-01-23]
+period: [2026-01-15, 2026-01-22]
 
 datasets:
   # ── observations ─────────────────────────────────────────────────────────
   # WAVE/ and WIND/ are NOT copies of each other: the CMEMS L3 files repeat
   # (each already carries both VAVH and WIND_SPEED), but WIND/ holds extra
   # CryoSat-2, Sentinel-3 and Sentinel-6 products. Glob both folders per
-  # instrument; matchup de-duplicates identical files by (name, size).
+  # instrument; FieldMatch detects (name, size) collisions and de-duplicates only
+  # byte-identical files (SHA-256), retaining distinct content with a warning.
   jason3:      {kind: altimeter_cmems, path: ["WAVE/JASON-3/*.nc",
                                               "WIND/JASON-3/*.nc"]}
   saral:       {kind: altimeter_cmems, path: ["WAVE/ALTIKA-SARAL/*.nc",
@@ -53,12 +54,12 @@ datasets:
                 init: "2026-01-18T00"}
   aifs_wind:   {kind: grib, path: "models/AI/aifs_j0b1_surface_winds_*.grib",
                 init: "2026-01-18T00"}
-  # All forecast inits in one dataset: use `matchup match ... --lead <hours>`
+  # All forecast inits in one dataset: use `fieldmatch collocate ... --lead <hours>`
   # to take a constant-lead slice across them (forecast verification view).
   forecasts:   {kind: grib, path: "models/forecast/forecast_*.grib"}
   # All AIFS inits; same --lead treatment (or `init:` to follow one forecast)
   aifs_all:    {kind: grib, path: "models/AI/aifs_j0b1_wave_parameters_*.grib"}
   # 00 UTC inits only -- the init hour is in the filename (_0_ vs _1200_).
-  # Use with a lead window: `match ... --lead 12-35` = forecast day 1, which
+  # Use with a lead window: `collocate ... --lead 12-35` = forecast day 1, which
   # tiles the timeline exactly when inits are daily.
   forecasts_00z: {kind: grib, path: "models/forecast/forecast_*_0_*.grib"}

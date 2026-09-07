@@ -1,0 +1,14 @@
+# Fully runnable after: python examples/create_demo_data.py
+campaign: demo
+data_root: ./data
+outdir: ./results
+region: {lonmin: 0, lonmax: 1, latmin: 0, latmax: 1}
+period: [2026-01-01, 2026-01-01]
+
+datasets:
+  altimeter:
+    kind: altimeter_cmems
+    path: altimeter.nc
+  model:
+    kind: netcdf
+    path: model.nc

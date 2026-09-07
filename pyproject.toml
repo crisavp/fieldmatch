@@ -3,30 +3,28 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "matchup"
-version = "0.1.0"
-description = "Config-driven collocation of wave/wind measurements (altimeters, SAR, scatterometers, buoys) against model fields (GRIB/netCDF)"
+name = "fieldmatch"
+version = "0.2.0"
+description = "Collocate observation products with gridded model fields"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
-    "scipy",
     "pandas",
     "xarray",
     "netcdf4",
     "cfgrib",       # GRIB engine; needs the eccodes C library (see environment.yml)
-    "matplotlib",
-    "joblib",
-    "tqdm",
     "pyyaml",
     "typer",
     "rich",
 ]
 
 [project.optional-dependencies]
+plot = ["matplotlib"]
 dev = ["pytest"]
 
 [project.scripts]
-matchup = "matchup.cli:app"
+fieldmatch = "fieldmatch.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
