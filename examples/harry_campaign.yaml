@@ -1,0 +1,42 @@
+# Set data_root in the notebook, or edit it here before using the CLI.
+campaign: harry_exploration
+data_root: ../../harry_storm/data
+outdir: results/harry
+region: {lonmin: 5, lonmax: 22, latmin: 32, latmax: 42}
+period: [2026-01-18, 2026-01-22]
+matching_defaults:
+  tolerance_minutes: 30
+  space_method: bilinear
+  time_tie: earlier
+
+datasets:
+  ba08: {kind: buoy_ispra, path: 'buoys/ba08_*.csv', lat: 36.0764, lon: 15.4018}
+  analysis: {kind: grib, path: 'models/analysis/*.grib', rename: {pp1d: tp, mwd: wave_dir}}
+  hindcast: {kind: grib, path: 'models/hindcast/*.grib', rename: {pp1d: tp, mwd: wave_dir}}
+  era5: {kind: grib, path: 'models/ERA5/*.grib', rename: {pp1d: tp, mwd: wave_dir}}
+  forecast18: {kind: grib, path: 'models/forecast/forecast_20260118_0_*.grib', rename: {pp1d: tp, mwd: wave_dir}}
+  aifs18: {kind: grib, path: 'models/AI/aifs_j0b1_wave_parameters_*.grib', init: '2026-01-18T00'}
+
+comparisons:
+  buoy_analysis:
+    obs: ba08
+    model: analysis
+    variables: {hs: {}}
+  buoy_hindcast:
+    obs: ba08
+    model: hindcast
+    variables: {hs: {}}
+  buoy_era5:
+    obs: ba08
+    model: era5
+    variables: {hs: {}}
+  analysis_era5:
+    reference: analysis       # Defines the output grid and difference sign.
+    model: era5               # Difference = ERA5 minus analysis.
+    time_basis: valid_time    # Analysis/reference consistency, not equal-lead skill.
+    variables: {hs: {}}
+  forecast18_models:
+    reference: forecast18
+    model: aifs18
+    time_basis: same_init     # Exact shared valid times AND equal initializations.
+    variables: {hs: {}}

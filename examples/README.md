@@ -75,3 +75,16 @@ scores = {name: stats_table(ds) for name, ds in aligned.items()}
 
 The returned counts expose how much each model loses when selecting common
 observations. This helper does not select event phases or confidence intervals.
+
+## Harry exploration with reusable plots
+
+Install the optional notebook dependencies (`pip install -e '.[notebook]'`), then
+open `harry_exploration.ipynb` in Jupyter. Set `DATA_ROOT` to the Harry data tree.
+The notebook uses `harry_campaign.yaml`, writes a resolved campaign next to its
+outputs, runs comparisons, intersects buoy samples explicitly, and makes four
+figures with provenance sidecars. It can redraw saved results by setting
+`RUN_COMPARISONS = False`; stale inputs/configurations are rejected.
+
+For automated execution, `FIELDMATCH_DATA_ROOT` and `FIELDMATCH_OUTPUT` override
+the two notebook paths. These are conveniences for the example, not library
+configuration rules. The original data are not redistributed.

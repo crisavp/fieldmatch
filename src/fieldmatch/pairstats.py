@@ -71,7 +71,7 @@ def format_stats(table):
 
 
 def plot_scatter(ds, var, out_png, title=""):
-    """Write the sole supported plot: an observation/model scatter."""
+    """Legacy CLI scatter entry point; reusable figures live in fieldmatch.plotting."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

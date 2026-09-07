@@ -133,3 +133,20 @@ Configuration migration: rename top-level `matching` to `matching_defaults`; rep
 comparison `variable: hs` with `variables: {hs: {}}`. Move comparison matching
 settings directly under that variable and model source mappings into dataset
 `rename`. The previous configuration spelling is rejected to keep one clear schema.
+
+## Model-to-model groups
+
+A group may instead contain exactly `reference`, `model`, `time_basis`, and
+`variables`. Both datasets must be models. `reference` defines the target grid
+and the subtracted field; the result is candidate (`model`) minus reference.
+`time_basis` is required: `valid_time`, `same_init`, or `same_lead`.
+All three use exact shared valid times; the latter two additionally require
+matching finite initialization or lead coordinates. No implicit temporal
+interpolation or tolerance applies to grid comparisons.
+
+Grid variables accept only `space_method`, `missing_corners`,
+`direction_resultant_min`, and `wind_direction_min_speed`. Shared spatial
+settings come from `matching_defaults`; its observation time settings do not
+apply. Variable-level time-tolerance settings on a grid group are rejected.
+`compare --describe` shows the exact effective rules. See
+[grid and plotting guide](grids-and-plotting.md) for examples.

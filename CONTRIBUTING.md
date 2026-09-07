@@ -9,7 +9,7 @@ python -m pip install -e .
 pytest -q
 ```
 
-Install `.[plot]` only when changing or checking the optional scatter output.
+Install `.[plot]` only when changing or checking the optional plotting module.
 
 ## Change workflow
 
@@ -44,6 +44,7 @@ provenance/license note.
 ## Scope
 
 FieldMatch accepts finite campaign comparisons and produces pair/statistics
-outputs. Incremental archive maintenance, download orchestration and additional
-plot families are out of scope. Proposals that expand the public workflow
-should explain why they cannot remain a separate tool.
+outputs. Incremental archive maintenance and download orchestration remain out of scope.
+The optional plotting module consumes prepared results: it must never match,
+regrid, intersect samples or choose a nearby timestamp implicitly. Scientific
+alignment belongs in the core; paper-specific figure selection belongs in examples.

@@ -252,6 +252,8 @@ def write_run_manifest(stem, camp, obs_name, model_name, status, **details):
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         **details,
     }
+    if record.get('comparison_kind') == 'grid':
+        record['reference_dataset'] = record.pop('obs_dataset')
     if "effective" in record:
         record["execution_digest"] = execution_digest(record["effective"])
     tmp = target.with_suffix(target.suffix + f".{os.getpid()}.tmp")
@@ -304,7 +306,7 @@ def validate_output_manifest(output):
         return True, "", "campaign YAML is unavailable; inputs were not revalidated"
     try:
         camp = load_campaign(campaign_file)
-        current = pair_digest(camp, record["obs_dataset"], record["model_dataset"])
+        current = pair_digest(camp, record.get("reference_dataset", record.get("obs_dataset")), record["model_dataset"])
     except Exception as exc:
         return False, f"cannot revalidate provenance: {exc}", ""
     if current != record.get("pair_digest"):

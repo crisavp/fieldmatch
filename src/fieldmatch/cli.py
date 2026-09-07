@@ -92,7 +92,7 @@ def collocate(
 def compare(
     campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
     comparison: str = typer.Argument(..., help="Named comparison in the YAML."),
-    format: str = typer.Option("csv", "--format"),
+    format: Optional[str] = typer.Option(None, "--format", help="Obs: csv by default. Grids: netcdf; csv gives spatial summaries."),
     describe: bool = typer.Option(False, "--describe", help="Show resolved settings without matching."),
 ):
     """Execute one fully declared comparison through the same Python runner."""
@@ -108,7 +108,7 @@ def compare(
         raise typer.BadParameter(str(exc)) from exc
     if describe:
         print(json.dumps(specs,indent=2,default=str)); return
-    _, failures=run_comparisons(camp,specs,formats=_formats(format))
+    _, failures=run_comparisons(camp,specs,formats=_formats(format or ("netcdf" if specs[0].get("kind")=="grid" else "csv")))
     if failures: raise typer.Exit(1)
 
 
@@ -131,6 +131,8 @@ def _open_pairs(path):
     manifest = manifest_path(path.with_suffix(""))
     if manifest.exists():
         record = json.loads(manifest.read_text())
+        if record.get('comparison_kind') == 'grid':
+            raise typer.BadParameter('grid CSV already contains spatial summaries; use the NetCDF with stats or plotting')
         ds.attrs.update(record.get("pair_attributes", {}))
         variable = ds.attrs.get("variable")
         attrs = record.get("effective", {}).get("observation_attributes", {})
@@ -174,6 +176,16 @@ def stats(
     if warning:
         rprint(f"[yellow]warning: {warning}[/yellow]")
     ds = _open_pairs(pairs)
+    if ds.attrs.get('comparison_kind') == 'grid':
+        if by_lead or scatter:
+            raise typer.BadParameter('grid statistics use saved exact times; select lead windows explicitly; scatter is for observation pairs')
+        from .grids import grid_stats
+        frame = grid_stats(ds).to_dataframe().reset_index()
+        print(frame.to_string(index=False))
+        if output:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            frame.to_csv(output, index=False, float_format='%.17g')
+        return
     rows = []
     if by_lead:
         if "lead_hours" not in ds:

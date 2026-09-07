@@ -81,6 +81,43 @@ Optional plotting: `python -m pip install -e '.[plot]'`, then `stats --scatter`.
 Supported observations: CMEMS altimetry, Sentinel-3/6 altimetry, Sentinel-1 OWI,
 ASCAT, and ISPRA buoy CSV. Models: rectilinear GRIB or NetCDF.
 
+## Model differences and figures
+
+Keep grid comparisons in the same campaign:
+
+```yaml
+comparisons:
+  analysis_era5:
+    reference: analysis       # Defines the grid; difference = ERA5 minus analysis.
+    model: era5
+    time_basis: valid_time    # Or same_init / same_lead, at exact shared valid times.
+    variables:
+      hs: {space_method: bilinear}
+```
+
+```bash
+fieldmatch compare campaign.yaml analysis_era5 --describe
+fieldmatch compare campaign.yaml analysis_era5 --format both
+```
+
+Grid output defaults to NetCDF (fields, differences, mask and forecast coordinates).
+For grids, CSV means per-time area-weighted difference summaries, not a flat grid.
+The observation command retains its CSV default. A model reference is not truth.
+
+```python
+from fieldmatch.results import open_result
+from fieldmatch.plotting import comparison_panels, save_figure
+
+result = open_result("comparison.nc")
+fig, axes = comparison_panels(result, "2026-01-20T18:00", clim=(0, 10), difference_limit=2)
+save_figure(fig, "storm.png")  # also writes storm.png.figure.json
+```
+
+Install `.[notebook]` for Jupyter and open
+[the Harry notebook](examples/harry_exploration.ipynb). Edit its data folder and
+settings, then run the cells. [Grid and plotting guide](docs/grids-and-plotting.md)
+explains the scientific choices and limits. The core has no plotting dependency.
+
 ## Documentation
 
 - [Campaign reference](docs/campaign-reference.md): selection, matching and named comparisons.

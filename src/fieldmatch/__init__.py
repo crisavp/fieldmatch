@@ -1,2 +1,2 @@
-"""FieldMatch: explicit observation/model comparisons."""
-__version__ = '0.2.0'
+"""FieldMatch: explicit observation/model and grid comparisons."""
+__version__ = '0.3.0'

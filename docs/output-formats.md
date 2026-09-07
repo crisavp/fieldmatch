@@ -82,3 +82,21 @@ threshold exposure and physical interpretation belong to the analysis script.
 - CSV numeric precision increases from four decimals to full precision.
 - Existing old pair files remain readable where unambiguous; their original
   matching errors cannot be repaired by recalculating statistics. Re-collocate.
+
+## Grid comparisons (0.3)
+
+Grid NetCDF contains `reference`, `candidate`, `difference`, `valid` (0/1) on
+(time, lat, lon), plus per-time finite counts and available reference/candidate
+initializations and leads. Both fields are masked to the same finite cells at
+each time. Differences are candidate minus reference, wrapped to [-180,180)
+for directions. `n_reference` and `n_candidate` are counts before common masking;
+`n_common` counts accepted cells. A time with no common cells remains present,
+with zero count, NaN fields/statistics, and zero valid area fraction.
+
+Grid CSV contains per-time spherical-area-weighted mean and RMS differences,
+valid area fraction and common-cell count. It cannot reconstruct field plots;
+use the NetCDF. Both formats have the same adjacent manifest convention with
+input hashes, effective settings, source grids and source-code hashes.
+Use `fieldmatch.results.open_result` to validate and load portable NetCDF or
+observation-pair CSV. Figure sidecars (`.figure.json`) preserve result-file hashes,
+comparison metadata, plot limits, axes and the figure checksum.

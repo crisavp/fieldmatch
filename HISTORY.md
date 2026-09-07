@@ -1,3 +1,14 @@
+# 0.3.0 — Grid comparisons and optional plotting
+
+- Add exact-time model/model comparisons on an explicitly chosen reference grid,
+  with valid-time, same-initialization and same-lead policies, common masks and
+  spherical area-weighted difference summaries.
+- Share scalar/circular/vector spatial sampling with observation matching.
+- Add optional field maps, difference panels, common-observation station series,
+  scatter plots and figure provenance sidecars. Plotting never aligns data.
+- Add a portable Harry campaign and an editable notebook in examples/.
+- Keep existing observation YAML and outputs compatible with the 0.2 checkpoint.
+
 # Configuration refinement
 
 Named comparisons group independent quantities under `variables`; settings go

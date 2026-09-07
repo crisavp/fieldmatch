@@ -35,14 +35,20 @@ def validate_matching(options):
 def validate_comparisons(comparisons, datasets):
     if not isinstance(comparisons, dict):
         raise ValueError('comparisons must be a mapping')
+    from .grid_comparison import GRID_OPTIONS, TIME_BASES
     for name, spec in comparisons.items():
         if not SAFE_NAME.fullmatch(str(name)) or not isinstance(spec, dict):
             raise ValueError(f'invalid comparison {name!r}')
-        if set(spec)-{'obs','model','variables'} or not {'obs','model','variables'} <= set(spec):
-            raise ValueError(f'comparison {name}: requires obs, model, variables mapping')
-        for key in ['obs','model']:
-            if spec[key] not in datasets or datasets[spec[key]].role != key:
-                raise ValueError(f'comparison {name}: {key} must name a {key} dataset')
+        grid = 'reference' in spec
+        required = {'reference','model','time_basis','variables'} if grid else {'obs','model','variables'}
+        if set(spec) != required:
+            raise ValueError(f'comparison {name}: requires exactly {sorted(required)}')
+        for key in (['reference','model'] if grid else ['obs','model']):
+            role = 'model' if grid else key
+            if spec[key] not in datasets or datasets[spec[key]].role != role:
+                raise ValueError(f'comparison {name}: {key} must name a {role} dataset')
+        if grid and spec['time_basis'] not in TIME_BASES:
+            raise ValueError(f'comparison {name}: time_basis must be one of {sorted(TIME_BASES)}')
         variables=spec['variables']
         if not isinstance(variables, dict) or not variables:
             raise ValueError(f'comparison {name}: variables must be a nonempty mapping')
@@ -50,10 +56,16 @@ def validate_comparisons(comparisons, datasets):
             if not isinstance(variable, str) or not SAFE_NAME.fullmatch(variable):
                 raise ValueError(f'invalid variable in {name}')
             validate_matching(options)
+            if grid and set(options)-GRID_OPTIONS:
+                raise ValueError('grid variables accept spatial settings only; times are exact')
 
 
 def resolve_comparisons(camp, comparison):
     """Expand a named group into independent, fully resolved quantity specifications."""
+    if 'reference' in camp.comparisons[comparison]:
+        from .grid_comparison import resolve_grid_comparison
+        return [resolve_grid_comparison(camp, comparison, v)
+                for v in camp.comparisons[comparison]['variables']]
     return [resolve_comparison(camp, variable=v, comparison=comparison)
             for v in camp.comparisons[comparison]['variables']]
 
@@ -112,6 +124,13 @@ def run_comparisons(campaign, specs, *, formats=('csv',), emit=print):
     implementation = {p.name:_file_sha256(p) for p in Path(__file__).parent.glob("*.py")}
     clouds, models, identities, results, failures = {}, {}, {}, [], []
     for spec in specs:
+        if spec.get('kind') == 'grid':
+            from .grid_comparison import run_grid_comparison
+            result, failure = run_grid_comparison(camp,spec,formats=formats,cache=models,
+                                                  identities=identities,emit=emit)
+            if result: results.append(result)
+            if failure: failures.append(failure)
+            continue
         variable=spec['variable']; od=camp.get(spec['obs_dataset']); md=camp.get(spec['model_dataset'])
         stem=camp.outdir/f"{camp.name}_{od.name}_x_{md.name}_{variable}"
         # Distinguish named experiments and forecast views; settings remain fully in the manifest.
