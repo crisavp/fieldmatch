@@ -7,12 +7,17 @@ import pandas as pd
 import typer
 import xarray as xr
 from rich import print as rprint
+from rich.console import Console
 
 
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
-                  help="Collocate observation products with gridded model fields.")
+                  help=("Compare observations and models, or two model grids, using a campaign YAML. "
+                        "Start with scan CAMPAIGN, then run CAMPAIGN --describe to preview "
+                        "resolved settings without computing or writing results; run CAMPAIGN "
+                        "computes all declared comparisons. Plot saved results with your Python script."),
+                  epilog="Use fieldmatch COMMAND --help for arguments, defaults and options.")
 
 
 @app.command()
@@ -26,7 +31,7 @@ def doctor():
 
 
 @app.command()
-def scan(campaign: Path = typer.Argument(..., exists=True, dir_okay=False)):
+def scan(campaign: Path = typer.Argument(..., exists=True, dir_okay=False, help="Campaign YAML containing datasets and comparison settings.")):
     """Inventory the files and coverage declared by a campaign YAML."""
     from .campaign import load_campaign
     from .scan import format_report, scan_campaign
@@ -35,14 +40,49 @@ def scan(campaign: Path = typer.Argument(..., exists=True, dir_okay=False)):
 
 
 @app.command()
-def vars(campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
+def vars(campaign: Path = typer.Argument(..., exists=True, dir_okay=False, help="Campaign YAML; relative paths use the terminal working directory."),
          dataset: str = typer.Argument(..., help="Dataset name in the campaign."),
-         all: bool = typer.Option(False, "--all", help="Include other axes/rates.")):
+         all: bool = typer.Option(False, "--all", help="Also list nonstandard fields and alternative time axes/cadences.")):
     """Show standardized and available variables for one dataset."""
     from .campaign import load_campaign
     from .varlist import describe_dataset, format_vars
     camp = load_campaign(campaign)
     print(format_vars(dataset, describe_dataset(camp.get(dataset)), show_all=all))
+
+
+def _describe(camp, specs):
+    """Use scan-style labelled blocks; retain every effective scientific setting."""
+    from textwrap import wrap
+    lines = [f"campaign: {camp.name}", f"  config : {camp.path}",
+             f"  outputs: {camp.outdir}",
+             "  mode   : preview only; no comparisons or result files written",
+             "  note   : scan checks data coverage; describe resolves configuration",
+             "           not set means no explicit value at this stage"]
+
+    def fields(mapping, indent=2):
+        for key, value in mapping.items():
+            label = key.replace('_', ' ')
+            prefix = ' ' * indent + label + ' : '
+            if isinstance(value, dict) and value:
+                lines.append(' ' * indent + label + ':')
+                fields(value, indent + 2)
+            else:
+                if value is None:
+                    value = 'not set'
+                elif isinstance(value, (list, tuple)):
+                    value = ', '.join(map(str, value)) or '(empty)'
+                elif value == {}:
+                    value = '(none)'
+                lines.extend(wrap(str(value), width=88, initial_indent=prefix,
+                                  subsequent_indent=' ' * (indent + 2), break_long_words=False,
+                                  break_on_hyphens=False) or [prefix])
+
+    for spec in specs:
+        lines.extend(['', f"{spec['comparison']} / {spec['variable']}  "
+                      + ('[GRID]' if spec.get('kind') == 'grid' else '[OBS vs MODEL]')])
+        fields({k: v for k, v in spec.items()
+                if k not in {'schema_version', 'campaign', 'comparison', 'variable'}})
+    Console().print('\n'.join(lines), markup=False, highlight=False)
 
 
 def _formats(value):
@@ -56,18 +96,18 @@ def _formats(value):
 
 @app.command()
 def collocate(
-    campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
-    obs: str = typer.Argument(...), model: str = typer.Argument(...),
+    campaign: Path = typer.Argument(..., exists=True, dir_okay=False, help="Campaign YAML; relative paths use the terminal working directory."),
+    obs: str = typer.Argument(..., help="Observation dataset key in the YAML."), model: str = typer.Argument(..., help="Model dataset key in the YAML."),
     variables: list[str] = typer.Option([], "--variable", "-v", help="Quantity; repeat for independent outputs."),
-    format: str = typer.Option("csv", "--format"),
-    tol_minutes: Optional[float] = typer.Option(None, help="Time tolerance, including zero for exact times."),
-    lead: Optional[str] = typer.Option(None, help="Explicit lead or lead window, hours."),
-    lead_tol: Optional[float] = typer.Option(None, help="Explicit nearest-lead fallback tolerance; default zero."),
-    overlap: Optional[str] = typer.Option(None, help="error (default) or shortest_lead."),
-    obs_variable: Optional[str] = typer.Option(None, help="Observation source for a single quantity."),
-    model_variable: Optional[str] = typer.Option(None, help="Model source for a single quantity."),
+    format: str = typer.Option("csv", "--format", help="csv, netcdf or both; one output per quantity plus a provenance manifest."),
+    tol_minutes: Optional[float] = typer.Option(None, help="Override nearest-time tolerance in minutes; 0 requires exact times. Omit to use YAML/defaults."),
+    lead: Optional[str] = typer.Option(None, help="Select forecast hours since initialization, e.g. 24 or 12-35; overrides YAML lead selection."),
+    lead_tol: Optional[float] = typer.Option(None, help="Maximum fallback distance in forecast hours when the requested lead is absent. Default 0: no fallback."),
+    overlap: Optional[str] = typer.Option(None, help="Resolve multiple forecasts for one valid time: error (default), or explicitly choose shortest_lead."),
+    obs_variable: Optional[str] = typer.Option(None, help="Observation source column for one --variable; use YAML mappings for multiple quantities."),
+    model_variable: Optional[str] = typer.Option(None, help="Model source field for one --variable; otherwise use the dataset mapping."),
 ):
-    """Match declared quantities independently; each gets its own table and manifest."""
+    """Advanced: match an obs/model pair directly, without a named comparison."""
     from .campaign import load_campaign
     from .comparison import resolve_comparison, run_comparisons
     if not variables:
@@ -90,13 +130,12 @@ def collocate(
 
 @app.command()
 def compare(
-    campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
+    campaign: Path = typer.Argument(..., exists=True, dir_okay=False, help="Campaign YAML; relative paths use the terminal working directory."),
     comparison: str = typer.Argument(..., help="Named comparison in the YAML."),
     format: Optional[str] = typer.Option(None, "--format", help="Obs: csv by default. Grids: netcdf; csv gives spatial summaries."),
-    describe: bool = typer.Option(False, "--describe", help="Show resolved settings without matching."),
+    describe: bool = typer.Option(False, "--describe", help="Preview effective settings, including defaults. No comparisons or result writes; use scan to check data coverage."),
 ):
-    """Execute one fully declared comparison through the same Python runner."""
-    import json
+    """Run one named YAML comparison; --describe previews its settings only."""
     from .campaign import load_campaign
     from .comparison import resolve_comparisons, run_comparisons
     camp=load_campaign(campaign)
@@ -107,19 +146,18 @@ def compare(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     if describe:
-        print(json.dumps(specs,indent=2,default=str)); return
+        _describe(camp, specs); return
     _, failures=run_comparisons(camp,specs,formats=_formats(format or ("netcdf" if specs[0].get("kind")=="grid" else "csv")))
     if failures: raise typer.Exit(1)
 
 
 @app.command()
 def run(
-    campaign: Path = typer.Argument(..., exists=True, dir_okay=False),
-    format: str = typer.Option("both", "--format", help="csv, netcdf or both (default)."),
-    describe: bool = typer.Option(False, "--describe", help="Show all resolved settings without computing."),
+    campaign: Path = typer.Argument(..., exists=True, dir_okay=False, help="Campaign YAML; relative paths use the terminal working directory."),
+    format: str = typer.Option("both", "--format", help="csv, netcdf or both (default). Grid CSV contains spatial summaries; plotting fields requires NetCDF."),
+    describe: bool = typer.Option(False, "--describe", help="Preview all effective settings, including defaults. No comparisons or result writes; use scan to check data coverage."),
 ):
-    """Run all named comparisons and variables declared in the campaign YAML."""
-    import json
+    """Run all YAML comparisons; --describe previews settings without computing or writing results."""
     from .campaign import load_campaign
     from .comparison import resolve_comparisons, run_comparisons
     camp = load_campaign(campaign)
@@ -131,7 +169,7 @@ def run(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     if describe:
-        print(json.dumps(specs, indent=2, default=str))
+        _describe(camp, specs)
         return
     _, failures = run_comparisons(camp, specs, formats=formats)
     if failures:
@@ -180,19 +218,21 @@ def _stats_rows(table, lead_min=None, lead_max=None):
 @app.command()
 def stats(
     pairs: Path = typer.Argument(..., exists=True, dir_okay=False,
-                                 help="Collocated .csv or .nc file."),
+                                 help="Saved observation pairs (.csv/.nc) or grid comparison (.nc). Keep its manifest beside it."),
     output: Optional[Path] = typer.Option(None, "--output", "-o",
-                                          help="Optional statistics CSV."),
+                                          help="Also save the displayed statistics to this CSV path."),
     by_lead: bool = typer.Option(False, "--by-lead",
-                                 help="Report separate forecast lead bins."),
-    lead_bin: float = typer.Option(24.0, help="Lead-bin width in hours."),
+                                 help="Observation pairs only: score separate forecast lead bins instead of pooling all leads."),
+    lead_bin: float = typer.Option(24.0, help="Bin width in forecast hours, used only with --by-lead (e.g. 24 gives [0,24), [24,48))."),
     scatter: bool = typer.Option(False, "--scatter",
-                                 help="Write one obs/model scatter per variable."),
+                                 help="Save an obs/model scatter PNG beside the input for each variable; requires plot extra, incompatible with --by-lead."),
 ):
-    """Calculate statistics from an existing collocated table."""
+    """Score saved observation pairs or summarize saved grid differences."""
     from .campaign import validate_output_manifest
     from .pairstats import format_stats, plot_scatter, stats_table
 
+    if scatter and by_lead:
+        raise typer.BadParameter("--scatter cannot be combined with --by-lead; run the scatter separately")
     if lead_bin <= 0:
         raise typer.BadParameter("--lead-bin must be greater than zero")
     valid, reason, warning = validate_output_manifest(pairs)
@@ -247,8 +287,6 @@ def stats(
                 png = pairs.with_name(f"{pairs.stem}_{variable}_scatter.png")
                 plot_scatter(ds, variable, png, title=pairs.stem)
                 rprint(f"  scatter -> {png}")
-    if scatter and by_lead:
-        rprint("[yellow]--scatter is ignored with --by-lead[/yellow]")
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_csv(output, index=False, na_rep="NaN")

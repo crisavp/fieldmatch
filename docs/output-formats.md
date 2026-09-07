@@ -33,6 +33,24 @@ that result and its manifest; use different named comparisons to retain policy
 sensitivity experiments. Temporary files and a running/complete/failed manifest
 prevent a failed rerun from masquerading as a successful current result.
 
+## Why are there JSON files?
+
+JSON is a plain-text format for structured records. FieldMatch writes these files
+automatically; edit your YAML to change a comparison, not its JSON records.
+
+| File | Purpose | What you should do |
+|---|---|---|
+| `*.manifest.json` beside CSV/NetCDF | Records settings, sources, software, accepted/rejected counts, completion status and checksums. Readers use it to detect incomplete, modified or stale results. | Keep it beside the result when copying or sharing. |
+| `*.png.figure.json` beside a figure | Records source-result hashes, plotting details, axis limits and figure checksum. Helps trace a figure back to its inputs. | Keep it for reproducibility; an image viewer does not need it. |
+
+A checksum is a fingerprint of file contents. It helps detect changes; it does not
+prove that the scientific decisions were correct. Manifests preserve those decisions
+so you can review them. They are records, not substitutes for the data or the study script.
+
+`fieldmatch run campaign.yaml --describe` displays resolved configuration in the
+terminal without creating these files. It does not check that the underlying data
+are readable or suitable; use `scan` and review the actual run diagnostics too.
+
 ## Manifest: keep it with the CSV
 
 `<stem>.manifest.json` saves the effective comparison, including defaults:

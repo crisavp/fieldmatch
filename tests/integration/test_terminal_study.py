@@ -99,3 +99,16 @@ def test_installer_existing_uses_active_python_and_new_never_updates(tmp_path):
     r=subprocess.run(['bash',str(ROOT/'install.sh'),'--new','already_exists'],env=env,cwd=tmp_path,capture_output=True,text=True)
     assert r.returncode==17
     assert 'env create' in log.read_text() and 'update' not in log.read_text() and 'prune' not in log.read_text()
+
+
+def test_help_explains_preview_and_stats_rejects_ignored_option(tmp_path):
+    from typer.testing import CliRunner
+    from fieldmatch.cli import app
+    runner = CliRunner()
+    help_text = runner.invoke(app, ['--help'])
+    assert help_text.exit_code == 0
+    assert '--describe' in help_text.output and 'without computing' in help_text.output
+    source = tmp_path/'pairs.csv'
+    source.write_text('time,hs,model_hs\n')
+    result = runner.invoke(app, ['stats', str(source), '--scatter', '--by-lead'])
+    assert result.exit_code != 0 and 'cannot be combined' in result.output

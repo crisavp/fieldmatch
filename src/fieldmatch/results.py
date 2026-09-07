@@ -71,4 +71,3 @@ def open_campaign_results(campaign):
     if not loaded:
         raise ValueError('No declared results to plot.')
     return loaded
-

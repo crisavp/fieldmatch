@@ -59,7 +59,7 @@ def test_named_comparison_and_cli_override_precedence(tmp_path):
     assert len(pd.read_csv(result))==2
     r=runner.invoke(app,['compare',str(p),'exact','--describe'])
     assert r.exit_code==0,r.output
-    assert json.loads(r.output)[0]['matching']['tolerance_minutes']==0
+    assert 'tolerance minutes : 0' in r.output and 'preview only' in r.output
 
 
 def test_explicit_cli_zero_and_missing_variable(tmp_path):

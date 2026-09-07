@@ -25,7 +25,7 @@ def campaign(tmp_path):
 def test_cli_grid_output_roundtrip_and_manifest(tmp_path):
     p=campaign(tmp_path);runner=CliRunner()
     r=runner.invoke(app,['compare',str(p),'difference','--describe']);assert r.exit_code==0,r.output
-    spec=json.loads(r.output)[0];assert spec['time_method']=='exact' and 'tolerance_minutes' not in spec['matching']
+    assert 'time method : exact' in r.output and 'tolerance minutes' not in r.output
     r=runner.invoke(app,['compare',str(p),'difference','--format','both']);assert r.exit_code==0,r.output
     path=tmp_path/'fieldmatch_out/grid.test_ref_x_other_hs_difference.nc'
     ds=open_result(path);np.testing.assert_allclose(ds.difference,2)

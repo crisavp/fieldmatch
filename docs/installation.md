@@ -100,7 +100,7 @@ own study folder. A wheel contains the importable package and `fieldmatch` comma
 copy the examples from the accompanying source archive when installing a wheel.
 
 ```bash
-python -m pip install '/path/to/fieldmatch-0.4.1-py3-none-any.whl[plot]'
+python -m pip install '/path/to/fieldmatch-0.4.2-py3-none-any.whl[plot]'
 fieldmatch doctor
 ```
 

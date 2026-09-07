@@ -1,3 +1,10 @@
+## 0.4.2
+
+- Explain preview mode in top-level CLI help and clarify command arguments/options.
+- Print run/compare --describe as labelled blocks consistent with scan, instead of JSON.
+- Reject stats --scatter with --by-lead instead of silently ignoring the scatter.
+- Document automatic result manifests and figure provenance files.
+
 ## 0.4.1
 
 - Installed `fieldmatch run` executes all declared comparisons; `--describe` shows resolved choices.

@@ -105,7 +105,15 @@ fieldmatch compare /path/to/study/harry.yaml buoy_analysis --describe
 fieldmatch compare /path/to/study/harry.yaml buoy_analysis --format both
 ```
 
+Use `fieldmatch --help` for the command overview and `fieldmatch COMMAND --help`
+for options. `run --describe` and `compare --describe` show labelled configuration
+previews without computing or writing results. The automatic JSON files are
+[provenance records](docs/output-formats.md#why-are-there-json-files), not extra
+configuration to maintain.
+
 ## Documentation
+
+- [CLI reference](docs/cli.md): commands, options and preview mode.
 
 - [Installation](docs/installation.md): existing/new environments and sharing.
 - [Analysis guide](docs/analysis-guide.md): full terminal sequence and optional cells.
