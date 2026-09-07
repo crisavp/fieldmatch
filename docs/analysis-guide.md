@@ -95,7 +95,7 @@ remain identifiable by their manifests. Inspect rejection counts and reasons.
 
 For observation comparisons, CSV and NetCDF contain the same finite pairs. For
 grid comparisons, NetCDF contains fields/mask/forecast coordinates; CSV contains
-per-time area-weighted spatial summaries. Keep the manifests beside the files.
+per-time area-weighted spatial summaries. Keep the hidden .fieldmatch directory with the result files.
 
 Repeating `run` replaces matching outputs with the same names. After editing the
 scientific YAML, rerun **all** its comparisons: current freshness fingerprints
@@ -235,3 +235,7 @@ figure sidecars together. Figure sidecars retain result hashes and display setti
 your analysis code is still needed to reconstruct custom filters or artists. Do not
 modify raw data in place. See [troubleshooting](troubleshooting.md) and the
 [output reference](output-formats.md) when a result cannot be validated.
+
+Use `fieldmatch config-example --output config_reference.yaml` for all editable keys,
+and `fieldmatch info RESULT` to read provenance without opening internal JSON.
+Preserve the hidden `.fieldmatch` folders when copying results.

@@ -151,5 +151,7 @@ def save_figure(fig, path, *, dpi=180):
         dpi=dpi,plots=getattr(fig,'_fieldmatch_records',[]),
         axes=[dict(title=a.get_title(),xlabel=a.get_xlabel(),ylabel=a.get_ylabel(),
                    xlim=list(a.get_xlim()),ylim=list(a.get_ylim())) for a in fig.axes])
-    Path(str(path)+'.figure.json').write_text(json.dumps(record,indent=2))
+    metadata = path.parent / '.fieldmatch' / (path.name + '.figure.json')
+    metadata.parent.mkdir(parents=True, exist_ok=True)
+    metadata.write_text(json.dumps(record,indent=2))
     return path

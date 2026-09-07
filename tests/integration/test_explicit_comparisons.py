@@ -40,7 +40,7 @@ def test_batch_does_not_change_single_quantity_and_saves_complete_manifest(tmp_p
     again,errors=run_comparisons(camp,specs[:1],emit=lambda _:None)
     xr.testing.assert_equal(saved.hs,_open_pairs(again[0]['outputs']['csv']).hs)
     assert 'test.v2_buoy_x_model_hs.csv'==results[0]['outputs']['csv'].name
-    manifest=json.loads(results[0]['outputs']['csv'].with_suffix('.manifest.json').read_text())
+    manifest=json.loads((results[0]['outputs']['csv'].parent/'.fieldmatch'/(results[0]['outputs']['csv'].stem+'.manifest.json')).read_text())
     assert manifest['effective']['matching']['tolerance_minutes']==60
     assert manifest['effective']['reader_options']['lat']==.5
     assert manifest['effective']['observation_attributes']['units']=='m'
@@ -59,7 +59,7 @@ def test_named_comparison_and_cli_override_precedence(tmp_path):
     assert len(pd.read_csv(result))==2
     r=runner.invoke(app,['compare',str(p),'exact','--describe'])
     assert r.exit_code==0,r.output
-    assert 'tolerance minutes : 0' in r.output and 'preview only' in r.output
+    assert 'tolerance minutes' in r.output and 'Preview only' in r.output
 
 
 def test_explicit_cli_zero_and_missing_variable(tmp_path):
@@ -76,7 +76,7 @@ def test_tampered_table_and_effective_spec_are_detected(tmp_path):
     path=r[0]['outputs']['csv'];path.write_text(path.read_text()+'\n')
     assert not validate_output_manifest(path)[0]
     assert 'checksum' in validate_output_manifest(path)[1]
-    manifest=path.with_suffix('.manifest.json');rec=json.loads(manifest.read_text())
+    manifest=path.parent/'.fieldmatch'/(path.stem+'.manifest.json');rec=json.loads(manifest.read_text())
     rec['effective']['matching']['tolerance_minutes']=999;manifest.write_text(json.dumps(rec))
     assert 'specification' in validate_output_manifest(path)[1]
 

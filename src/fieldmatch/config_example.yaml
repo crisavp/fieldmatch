@@ -1,0 +1,131 @@
+# FieldMatch configuration reference: all supported editable keys.
+# Obtain a fresh copy: fieldmatch config-example --output study.yaml
+# This is a catalogue with placeholder files, not a ready-to-run dataset.
+# Keep only the datasets/comparisons you need; change names and paths.
+# Reader-specific keys cannot be used with another kind unless listed there.
+campaign: example
+# Paths below resolve relative to this YAML. Dataset paths resolve from data_root.
+data_root: ./data          # default: YAML directory
+outdir: ./results          # default: fieldmatch_out
+region: {lonmin: 5, lonmax: 22, latmin: 32, latmax: 42} # required; degrees
+period: ['2026-01-18', '2026-01-22'] # required UTC; date-only end includes whole day
+
+# These defaults apply to obs/model matching. Grid groups inherit spatial keys only.
+matching_defaults:
+  time_method: nearest       # only nearest is implemented (not interpolation)
+  tolerance_minutes: 30      # finite >=0; 0 requires exact timestamps
+  time_tie: earlier          # earlier | later for equidistant model times
+  space_method: bilinear     # bilinear | nearest; no extrapolation
+  missing_corners: reject_nonzero_weight # only implemented policy
+  direction_resultant_min: 1.0e-10 # [0,1]; reject cancelling circular directions
+  wind_direction_min_speed: 1.0e-10 # >=0 m/s; reject direction of near-zero vector
+
+datasets:
+  # Every dataset needs kind and path. path accepts one glob or a list of globs.
+  # Readers have fixed product conventions; these are NOT generic NetCDF readers.
+  cmems:
+    kind: altimeter_cmems    # CMEMS L3 flat along-track time axis
+    path: 'cmems/*.nc'
+    extra_vars: []           # default none; string or list of source fields
+    # Outputs: hs, hs_unfiltered, wind_speed. Upstream editing only.
+    # No configurable coastal filter: this product lacks the needed fields.
+
+  sentinel3:
+    kind: altimeter_s3       # Sentinel-3 SRAL L2 WAT; time_01 (1 Hz)
+    path: ['s3/pass1/*.nc', 's3/pass2/*.nc']
+    retracker: sar          # sar (default) | plrm
+    min_dist_coast_km: 30   # default 30 km; 0 disables distance filtering
+    open_ocean_only: true   # default true; false disables surface-type filtering
+    extra_vars: []          # source fields on time_01 only; not 20 Hz variables
+    # Quality flags are applied when available; no configurable qc switch.
+    # Missing coastal/surface fields are recorded as filters NOT applied.
+
+  sentinel6:
+    kind: altimeter_s6       # Sentinel-6 P4 L2 LR; data_01/time (1 Hz)
+    path: 's6/*.nc'
+    retracker: mle          # mle (default) | nr; nr requires band: ku
+    band: ku               # ku (default) | c; c with nr is unsupported
+    min_dist_coast_km: 30   # 0 disables distance filtering
+    open_ocean_only: true   # false disables surface-type filtering
+    extra_vars: []          # [] default; e.g. ['ku:swh_ocean', 'c:swh_ocean']
+    # Unqualified names refer to data_01. ku: and c: select the band groups.
+    # Quality flags apply to swh/sig0 when present; wind has no local quality flag filter.
+
+  sar:
+    kind: sentinel1          # Sentinel-1 OCN OWI wind grid
+    path: 's1/*.nc'
+    qc: true               # default true: quality and owiMask filtering
+    extra_vars: []         # source fields on (owiAzSize, owiRaSize)
+    # qc: false disables BOTH wind quality and land/ice/no-data/RFI masks.
+
+  scatterometer:
+    kind: ascat             # ASCAT L2; NUMROWS x NUMCELLS
+    path: 'ascat/*.nc'
+    extra_vars: []          # source fields on (NUMROWS, NUMCELLS)
+    # Fixed QC: wvc_quality_flag <65536; no YAML qc switch.
+    # One timestamp per swath row is required; direction converted +180 deg.
+
+  buoy:
+    kind: buoy_ispra         # ISPRA/RON semicolon CSV, fixed station
+    path: 'buoy.csv'
+    lat: 36.0764            # REQUIRED latitude, degrees [-90,90]
+    lon: 15.4018            # REQUIRED longitude, degrees [-180,180]
+    # No extra_vars/rename/qc options. Known export headers are mapped internally.
+    # All-zero columns can mean absent sensors and are dropped by this reader.
+
+  model:
+    kind: grib              # grib | netcdf (same editable model keys)
+    path: 'models/*.grib'
+    rename: {pp1d: tp, mwd: wave_dir} # default {}; raw -> chosen variable name
+    coords: {}              # default {}; raw coordinate -> time/lat/lon
+    # Example coords: {latitude: lat, longitude: lon, valid_time: time}
+    init: null              # default null; or quoted initialization '2026-01-18T00'
+    lead: null              # default null; or 24, or '12-35' hours since init
+    # A non-null lead takes precedence over init; select one strategy deliberately.
+    lead_tol: 0             # >=0 hours; default 0 = no nearest-lead fallback
+    overlap: error          # error (default) | shortest_lead for duplicate valid times
+    # swh -> hs is normalized BEFORE rename. No automatic unit conversion.
+    # Only rectilinear 1-D lat/lon grids; loaders do not reconcile different grids.
+
+  other_model:
+    kind: netcdf
+    path: 'other/*.nc'
+    rename: {}
+    coords: {}
+    init: null
+    lead: null
+    lead_tol: 0
+    overlap: error
+
+comparisons:
+  # Observation group: ONLY obs, model, variables are accepted here.
+  buoy_model:
+    obs: buoy
+    model: model
+    variables:
+      hs: {}               # inherits matching_defaults; one output per variable
+      tp:                  # every matching_defaults key may be set here
+        time_method: nearest
+        tolerance_minutes: 0
+        time_tie: earlier
+        space_method: bilinear
+        missing_corners: reject_nonzero_weight
+        direction_resultant_min: 1.0e-10
+        wind_direction_min_speed: 1.0e-10
+    # Variable keys are quantities, not provider aliases; align model names with rename.
+    # No obs_variable/model_variable keys in this block; direct source selection
+    # is available through advanced collocate/Python API.
+
+  # Grid group: ONLY reference, model, time_basis, variables are accepted here.
+  models:
+    reference: model        # target grid and subtracted field
+    model: other_model      # difference = this model minus reference
+    time_basis: valid_time  # valid_time | same_init | same_lead; all use exact times
+    variables:
+      hs:
+        space_method: bilinear
+        missing_corners: reject_nonzero_weight
+        direction_resultant_min: 1.0e-10
+        wind_direction_min_speed: 1.0e-10
+    # No time tolerance or time_tie keys for grids. same_init/same_lead also
+    # require equal finite initialization/lead coordinates at common valid times.

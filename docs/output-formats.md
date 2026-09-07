@@ -40,8 +40,8 @@ automatically; edit your YAML to change a comparison, not its JSON records.
 
 | File | Purpose | What you should do |
 |---|---|---|
-| `*.manifest.json` beside CSV/NetCDF | Records settings, sources, software, accepted/rejected counts, completion status and checksums. Readers use it to detect incomplete, modified or stale results. | Keep it beside the result when copying or sharing. |
-| `*.png.figure.json` beside a figure | Records source-result hashes, plotting details, axis limits and figure checksum. Helps trace a figure back to its inputs. | Keep it for reproducibility; an image viewer does not need it. |
+| `.fieldmatch/*.manifest.json` | Records settings, sources, software, accepted/rejected counts, completion status and checksums. Readers use it to detect incomplete, modified or stale results. | Copy the whole results folder, including its hidden `.fieldmatch` directory. |
+| `.fieldmatch/*.png.figure.json` | Records source-result hashes, plotting details, axis limits and figure checksum. Helps trace a figure back to its inputs. | Keep it for reproducibility; an image viewer does not need it. |
 
 A checksum is a fingerprint of file contents. It helps detect changes; it does not
 prove that the scientific decisions were correct. Manifests preserve those decisions
@@ -51,9 +51,9 @@ so you can review them. They are records, not substitutes for the data or the st
 terminal without creating these files. It does not check that the underlying data
 are readable or suitable; use `scan` and review the actual run diagnostics too.
 
-## Manifest: keep it with the CSV
+## Provenance storage
 
-`<stem>.manifest.json` saves the effective comparison, including defaults:
+`.fieldmatch/<stem>.manifest.json` saves the effective comparison, including defaults:
 
 - source/quantity mapping, units, direction conventions and reader/QC provenance;
 - matching policy, initialization/lead/overlap selection, actual matched leads;
@@ -113,7 +113,7 @@ with zero count, NaN fields/statistics, and zero valid area fraction.
 
 Grid CSV contains per-time spherical-area-weighted mean and RMS differences,
 valid area fraction and common-cell count. It cannot reconstruct field plots;
-use the NetCDF. Both formats have the same adjacent manifest convention with
+use the NetCDF. Both formats have the same hidden provenance directory convention with
 input hashes, effective settings, source grids and source-code hashes.
 Use `fieldmatch.results.open_result` to validate and load portable NetCDF or
 observation-pair CSV. Figure sidecars (`.figure.json`) preserve result-file hashes,
@@ -127,3 +127,23 @@ Reusing only plots (`python /path/to/analyze.py`) is appropriate
 when scientific inputs/settings are unchanged. A figure sidecar identifies its
 source result and display settings; keep the analysis code as well to document
 additional sample selection and custom plotting.
+
+## Read provenance without opening JSON
+
+```bash
+fieldmatch info /path/to/result.nc
+fieldmatch info /path/to/figure.png
+fieldmatch info /path/to/result.nc --details
+```
+
+New records live in a hidden `.fieldmatch` subfolder beside results or figures.
+FieldMatch manages them; info is the user-facing view. Comparison info checks the
+saved status, specification, result checksum and current inputs where available.
+Figure info checks the PNG checksum and displays its recorded sources/settings;
+it does not revalidate every source file. Missing records are reported explicitly.
+
+Existing adjacent JSON records remain readable. A new hidden record takes precedence
+over an old sidecar for the same result, including failed/running records. Reruns
+write the new layout; existing sidecars are not automatically deleted. Copy the whole
+results folder including hidden files when sharing. Hiding metadata reduces clutter;
+it does not make it secret or remove the need to preserve it.

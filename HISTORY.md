@@ -1,3 +1,10 @@
+## 0.5.0
+
+- Colored Rich panels for configuration previews; info presents saved provenance.
+- New result and figure records live in .fieldmatch subfolders, with legacy sidecar reads retained.
+- Installed config-example command provides a commented catalogue covering every reader and model option.
+- Reader reference distinguishes editable settings from fixed processing rules.
+
 ## 0.4.2
 
 - Explain preview mode in top-level CLI help and clarify command arguments/options.

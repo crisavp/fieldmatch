@@ -113,6 +113,8 @@ configuration to maintain.
 
 ## Documentation
 
+- [Reader options](docs/readers.md) and [complete YAML catalogue](src/fieldmatch/config_example.yaml).
+
 - [CLI reference](docs/cli.md): commands, options and preview mode.
 
 - [Installation](docs/installation.md): existing/new environments and sharing.
@@ -126,3 +128,7 @@ configuration to maintain.
 Version 0.4 changes the example workflow and installation guidance. Numerical
 comparison settings and the 0.3 YAML schema remain compatible. The source archive
 includes scripts and documentation; the wheel installs the package itself.
+
+Use `fieldmatch config-example --output config_reference.yaml` for all editable keys,
+and `fieldmatch info RESULT` to read provenance without opening internal JSON.
+Preserve the hidden `.fieldmatch` folders when copying results.

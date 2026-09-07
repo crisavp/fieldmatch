@@ -67,3 +67,7 @@ is the smaller runnable study once its data_root points at a Harry delivery.
 
 All scientific choices remain in the YAML or Python script. Example data and
 notebook results from a particular user's installation are not distributed.
+
+Use `fieldmatch config-example --output config_reference.yaml` for all editable keys,
+and `fieldmatch info RESULT` to read provenance without opening internal JSON.
+Preserve the hidden `.fieldmatch` folders when copying results.

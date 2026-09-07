@@ -5,6 +5,8 @@ Start with `fieldmatch --help`. Each command also accepts `--help`, for example
 
 | Command | Use |
 |---|---|
+| `config-example --output study.yaml` | Write the fully commented configuration catalogue, including every built-in reader. |
+| `info RESULT` | Validate and explain a saved comparison or PNG; `--details` shows the complete provenance. |
 | `doctor` | Check installation and data-reading engines. |
 | `scan CAMPAIGN` | Inventory source files, coverage and available quantities. |
 | `vars CAMPAIGN DATASET` | Examine standardized variables and source fields for one dataset key. `--all` includes nonstandard fields and alternative axes/cadences. |
@@ -52,6 +54,19 @@ saved exact times; neither option applies to grid comparisons.
 
 ## Preview versus provenance
 
-Describe uses labelled terminal blocks like scan. It resolves configuration but
+Describe uses colored panels with aligned settings; colors follow terminal capabilities. It resolves configuration but
 does not inspect raw data, guarantee coverage or create JSON files. Result and
 figure JSON files are automatic [provenance records](output-formats.md#why-are-there-json-files).
+
+## Why both collocate and compare?
+
+For an observation/model pair they call the same scientific engine. `collocate`
+takes dataset keys and explicit CLI options, without a named comparison block.
+`compare` reads a named YAML block, including independent settings for each
+variable, and supports both observation/model pairs and model/model grids.
+`run` executes every named comparison. Prefer compare/run for a reusable study;
+collocate remains an advanced one-off/API-compatible entry point.
+
+A direct `collocate campaign.yaml buoy model -v hs` does **not** look up a named
+comparison's per-variable settings. It uses matching_defaults plus explicit CLI
+choices. Results are equivalent only if the effective settings and inputs match.

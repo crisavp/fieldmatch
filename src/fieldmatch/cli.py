@@ -51,38 +51,35 @@ def vars(campaign: Path = typer.Argument(..., exists=True, dir_okay=False, help=
 
 
 def _describe(camp, specs):
-    """Use scan-style labelled blocks; retain every effective scientific setting."""
-    from textwrap import wrap
-    lines = [f"campaign: {camp.name}", f"  config : {camp.path}",
-             f"  outputs: {camp.outdir}",
-             "  mode   : preview only; no comparisons or result files written",
-             "  note   : scan checks data coverage; describe resolves configuration",
-             "           not set means no explicit value at this stage"]
+    from .terminal import describe
+    describe(camp, specs)
 
-    def fields(mapping, indent=2):
-        for key, value in mapping.items():
-            label = key.replace('_', ' ')
-            prefix = ' ' * indent + label + ' : '
-            if isinstance(value, dict) and value:
-                lines.append(' ' * indent + label + ':')
-                fields(value, indent + 2)
-            else:
-                if value is None:
-                    value = 'not set'
-                elif isinstance(value, (list, tuple)):
-                    value = ', '.join(map(str, value)) or '(empty)'
-                elif value == {}:
-                    value = '(none)'
-                lines.extend(wrap(str(value), width=88, initial_indent=prefix,
-                                  subsequent_indent=' ' * (indent + 2), break_long_words=False,
-                                  break_on_hyphens=False) or [prefix])
 
-    for spec in specs:
-        lines.extend(['', f"{spec['comparison']} / {spec['variable']}  "
-                      + ('[GRID]' if spec.get('kind') == 'grid' else '[OBS vs MODEL]')])
-        fields({k: v for k, v in spec.items()
-                if k not in {'schema_version', 'campaign', 'comparison', 'variable'}})
-    Console().print('\n'.join(lines), markup=False, highlight=False)
+@app.command(name='info')
+def info(result: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                      help="Saved comparison CSV/NetCDF or PNG figure."),
+         details: bool = typer.Option(False, '--details', help="Also show the complete recorded provenance, including hashes.")):
+    """Explain a saved result or figure and check its recorded provenance."""
+    from .terminal import result_info
+    if not result_info(result, details=details):
+        raise typer.Exit(1)
+
+
+@app.command(name='config-example')
+def config_example(output: Optional[Path] = typer.Option(None, '--output', '-o',
+                                     help="Write a commented YAML template to a new file; otherwise print it.")):
+    """Show all supported YAML settings and examples for every built-in reader."""
+    from importlib.resources import files
+    template = files('fieldmatch').joinpath('config_example.yaml').read_text()
+    if output is None:
+        print(template, end='')
+    else:
+        try:
+            with output.open('x') as stream:
+                stream.write(template)
+        except FileExistsError as exc:
+            raise typer.BadParameter(f'{output} already exists; choose a new filename') from exc
+        Console().print(f'Configuration template written to {output}', markup=False)
 
 
 def _formats(value):

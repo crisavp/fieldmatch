@@ -1,7 +1,9 @@
 # Campaign reference
 
 For a guided workflow, start with [Your first complete analysis](analysis-guide.md).
-This page lists the configuration contract.
+This page lists the configuration contract. Obtain every editable key with
+`fieldmatch config-example --output config_reference.yaml`; see the
+[reader reference](readers.md) for defaults and fixed reader behavior.
 
 Required: `campaign`, `region`, `period`, `datasets`. Optional: `data_root`,
 `outdir`, `matching_defaults`, `comparisons`. Unknown keys are errors. Paths resolve
@@ -44,8 +46,8 @@ Repeat `--variable` for separate outputs. `--obs-variable` and
 Precedence is library defaults → `matching_defaults` → settings directly under each
 variable. The lower-level Python API also accepts explicit overrides. Each variable
 is matched independently; `{}` uses the shared defaults. `variables` must be a
-nonempty mapping, and unknown settings are errors. `compare --describe` returns
-a list of fully resolved specifications. The named CLI command takes its scientific
+nonempty mapping, and unknown settings are errors. `compare --describe` displays
+fully resolved specifications in colored terminal panels. The named CLI command takes its scientific
 settings from the configuration. The full result is saved, including defaults.
 
 | Setting | Default | Meaning |

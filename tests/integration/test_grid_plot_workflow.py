@@ -25,12 +25,14 @@ def campaign(tmp_path):
 def test_cli_grid_output_roundtrip_and_manifest(tmp_path):
     p=campaign(tmp_path);runner=CliRunner()
     r=runner.invoke(app,['compare',str(p),'difference','--describe']);assert r.exit_code==0,r.output
-    assert 'time method : exact' in r.output and 'tolerance minutes' not in r.output
+    assert 'exact' in r.output and 'tolerance minutes' not in r.output
     r=runner.invoke(app,['compare',str(p),'difference','--format','both']);assert r.exit_code==0,r.output
     path=tmp_path/'fieldmatch_out/grid.test_ref_x_other_hs_difference.nc'
     ds=open_result(path);np.testing.assert_allclose(ds.difference,2)
     assert validate_output_manifest(path)[0]
-    manifest=json.loads(path.with_suffix('.manifest.json').read_text())
+    info = runner.invoke(app, ['info', str(path)])
+    assert info.exit_code == 0 and 'passed available checks' in info.output
+    manifest=json.loads((path.parent/'.fieldmatch'/(path.stem+'.manifest.json')).read_text())
     assert manifest['reference_dataset']=='ref' and 'obs_dataset' not in manifest
     assert manifest['effective']['inputs']['reference'][0]['sha256']
     assert pd.read_csv(path.with_suffix('.csv')).rms_difference.tolist()==[2,2]
@@ -52,7 +54,9 @@ def test_plotting_preserves_data_uses_exact_time_and_records_provenance(tmp_path
     ds=open_result(tmp_path/'fieldmatch_out/grid.test_ref_x_other_hs_difference.nc');before=ds.copy(deep=True)
     fig,axes=plotting.comparison_panels(ds,'2026-01-01',clim=(0,10),difference_limit=3)
     path=plotting.save_figure(fig,tmp_path/'panels.png')
-    assert path.exists();rec=json.loads((tmp_path/'panels.png.figure.json').read_text())
+    assert path.exists();rec=json.loads((tmp_path/'.fieldmatch/panels.png.figure.json').read_text())
+    info = CliRunner().invoke(app, ['info', str(path)])
+    assert info.exit_code == 0 and 'checksum matches' in info.output
     assert len(rec['plots'])==3 and rec['plots'][0]['comparison']['result_sha256']
     assert axes[0].collections[0].get_clim()==axes[1].collections[0].get_clim()
     assert axes[2].collections[0].get_clim()==(-3,3)

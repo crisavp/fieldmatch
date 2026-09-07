@@ -43,7 +43,10 @@ def open_result(path):
 def open_campaign_results(campaign):
     """Load only this campaign's declared quantities; validate each saved result."""
     records = {}
-    for file in campaign.outdir.glob('*.manifest.json'):
+    # Prefer the new record when a rerun leaves a legacy sidecar behind.
+    files = {p.name: p for p in campaign.outdir.glob('*.manifest.json')}
+    files.update({p.name: p for p in (campaign.outdir / '.fieldmatch').glob('*.manifest.json')})
+    for file in files.values():
         record = json.loads(file.read_text())
         effective = record.get('effective', {})
         if effective.get('campaign') != campaign.name:

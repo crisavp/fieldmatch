@@ -236,13 +236,17 @@ def pair_digest(camp, obs_name, model_name):
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def manifest_path(stem):
-    return Path(f"{stem}.manifest.json")
+def manifest_path(stem, *, writing=False):
+    """New metadata is private to the results folder; read old sidecars too."""
+    stem = Path(stem)
+    hidden = stem.parent / '.fieldmatch' / f'{stem.name}.manifest.json'
+    legacy = Path(f'{stem}.manifest.json')
+    return hidden if writing or hidden.exists() or not legacy.exists() else legacy
 
 
 def write_run_manifest(stem, camp, obs_name, model_name, status, **details):
     """Atomically record whether the stable output belongs to the latest run."""
-    target = manifest_path(stem)
+    target = manifest_path(stem, writing=True)
     target.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "status": status,
@@ -266,13 +270,13 @@ def validate_run_manifest(stem, camp, obs_name, model_name):
     """Return (ok, reason) for a pair produced from a known campaign."""
     path = manifest_path(stem)
     if not path.exists():
-        return False, f"{path} is missing (rerun `fieldmatch collocate`)"
+        return False, f"{path} is missing (rerun the comparison)"
     try:
         record = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         return False, f"cannot read {path}: {exc}"
     if record.get("status") != "complete":
-        return False, f"latest collocation run is {record.get('status', 'unknown')!r}"
+        return False, f"latest comparison run is {record.get('status', 'unknown')!r}"
     if record.get("pair_digest") != pair_digest(camp, obs_name, model_name):
         return False, "campaign settings or input files changed since this pair was written"
     return True, ""
@@ -288,13 +292,13 @@ def validate_output_manifest(output):
     output = Path(output)
     path = manifest_path(output.with_suffix(""))
     if not path.exists():
-        return True, "", "no adjacent manifest; provenance cannot be revalidated"
+        return True, "", "no provenance record; copy the results folder including .fieldmatch to preserve validation"
     try:
         record = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         return False, f"cannot read {path}: {exc}", ""
     if record.get("status") != "complete":
-        return False, f"latest collocation run is {record.get('status', 'unknown')!r}", ""
+        return False, f"latest comparison run is {record.get('status', 'unknown')!r}", ""
     if "effective" in record and record.get("execution_digest") != execution_digest(record["effective"]):
         return False, "effective comparison specification does not match its digest", ""
     fmt = "netcdf" if output.suffix in {".nc", ".netcdf"} else "csv"
