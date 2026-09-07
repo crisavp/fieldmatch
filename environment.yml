@@ -1,32 +1,21 @@
-# Conda environment for FieldMatch.
-#
-#   conda env create -f environment.yml
-#   conda activate fieldmatch
-#   pip install -e .
-#
-# (or just run ./install.sh, which does both and checks the result)
-#
-# conda-forge is required: eccodes/cfgrib (the ECMWF GRIB engine) are not in
-# the defaults channel, and mixing channels is the usual cause of a broken
-# GRIB install.
+# Optional new environment, including the GRIB C library and plotting.
+# conda env create -f environment.yml
+# conda activate fieldmatch
+# python -m pip install '.[plot]'
 name: fieldmatch
 channels:
   - conda-forge
   - nodefaults
 dependencies:
   - python >=3.10,<3.14
-  # numerics / data
   - numpy >=1.24
   - pandas >=2.0
   - xarray >=2024.1
-  # file formats
-  - netcdf4 >=1.6            # satellite + model netCDF
-  - eccodes >=2.30           # ECMWF GRIB C library
-  - cfgrib >=0.9.10          # xarray GRIB engine (needs eccodes)
-  - pyyaml >=6.0             # campaign / config files
-  # CLI (plots are optional: pip install -e ".[plot]")
+  - netcdf4 >=1.6
+  - eccodes >=2.30
+  - cfgrib >=0.9.10
+  - pyyaml >=6.0
   - typer >=0.12
   - rich >=13.0
-  # tests
-  - pytest >=7.0
+  - matplotlib
   - pip

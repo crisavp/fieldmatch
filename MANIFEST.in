@@ -1,0 +1,7 @@
+include README.md HISTORY.md CONTRIBUTING.md environment.yml install.sh
+recursive-include docs *.md
+recursive-include examples *.py *.yaml *.md
+recursive-exclude examples/data *
+recursive-exclude examples/results *
+recursive-include tests *.py *.md
+recursive-include config *.yaml

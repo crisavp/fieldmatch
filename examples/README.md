@@ -1,94 +1,60 @@
-# FieldMatch examples
+# Runnable examples
 
-For your first real study, follow [Your first complete analysis](../docs/analysis-guide.md).
-Copy the Harry notebook and YAML to your own study folder before editing them.
-The sections below cover synthetic checks and additional API examples.
+## Terminal-first real-data study
 
-## Runnable synthetic campaign
+Copy `analyze.py` and `harry.yaml` into a study folder. Edit the YAML's data_root
+once, then use:
 
-Generate three synthetic observations and a tiny model grid:
+```bash
+python /path/to/study/analyze.py inspect
+python /path/to/study/analyze.py run
+python /path/to/study/analyze.py plot
+```
+
+The default YAML is beside the script. An explicit `--config` can be absolute or
+relative to the script; it never depends on the terminal working directory.
+Data and output paths resolve from the YAML. Plotting reads saved results and
+writes a browser gallery, images, tables and figure sidecars under `<outdir>/figures`.
+`plot --show` also displays figures when a graphical backend is available.
+
+The same script contains VS Code `# %%` cells. Install `.[interactive]`, select
+your installed environment, and set `INTERACTIVE_CONFIG` to an absolute YAML path.
+Run setup → inspect → run → plot; skip the run cell to reuse existing comparisons.
+The returned `tables`, `pairs` and `grids` can be inspected or used in further cells.
+No JupyterLab server is needed. See the [analysis guide](../docs/analysis-guide.md).
+
+This script is intentionally editable study code, not another configuration
+framework. It makes common-sample grouping and the optional severe-Hs threshold
+visible. Adapt its analysis choices when the scientific question changes.
+
+## Synthetic smoke test (no external data)
+
+From the source folder:
 
 ```bash
 python examples/create_demo_data.py
 fieldmatch scan examples/minimal_campaign.yaml
 fieldmatch vars examples/minimal_campaign.yaml altimeter
-fieldmatch collocate examples/minimal_campaign.yaml altimeter model --variable hs
-fieldmatch stats examples/results/demo_altimeter_x_model_hs.csv
-```
-
-Try the other output modes:
-
-```bash
-fieldmatch collocate examples/minimal_campaign.yaml altimeter model --variable hs --format netcdf
 fieldmatch collocate examples/minimal_campaign.yaml altimeter model --variable hs --format both
-fieldmatch stats examples/results/demo_altimeter_x_model_hs.nc \
-  --output examples/results/demo_statistics.csv
+fieldmatch stats examples/results/demo_altimeter_x_model_hs.nc
 ```
 
-The generated `examples/data/` and `examples/results/` directories are ignored
-by Git and may be deleted at any time.
+The generated examples/data and examples/results directories are ignored by Git.
+The source scripts locate their bundled data relative to their own file locations.
+The package CLI uses normal shell paths for its positional YAML argument; use an
+absolute path when invoking it outside the source folder.
 
-### Python building blocks
+`python examples/python_api.py` demonstrates `read_obs`, `open_model`,
+`collocate_track` and `write_pairs`. That lower-level workflow leaves campaign
+provenance management to your script; named comparisons are the usual starting point.
 
-The campaign CLI is the recommended public workflow because it handles file
-discovery, cropping, manifests and provenance. For code that already owns those
-concerns, the same synthetic files can exercise the lower-level Python API:
+## Other templates
 
-```bash
-PYTHONPATH=src python examples/python_api.py
-```
+`forecast_campaign.yaml` illustrates fixed initialization/lead selection.
+`extra_variables_campaign.yaml` illustrates reader choices and extra source fields.
+These templates contain placeholder paths and require your own datasets.
+`config/campaigns/harry.yaml` is a larger inventory template; `examples/harry.yaml`
+is the smaller runnable study once its data_root points at a Harry delivery.
 
-The example shows the three boundaries directly: `read_obs`, `open_model` and
-`collocate_track`, followed by `write_pairs`.
-
-## Templates for real products
-
-- `forecast_campaign.yaml` shows a multi-initialization GRIB archive with a
-  fixed buoy. Run collocation with `--lead 24` or a window such as `--lead
-  12-35`.
-- `extra_variables_campaign.yaml` shows reader choices, coordinate/variable
-  mappings and `extra_vars`. Run `fieldmatch vars ... --all` against the real
-  delivery before choosing source names.
-
-Templates intentionally contain `/path/to/study`; they are documentation and
-will not run until paths, region and period are replaced. Copy a template for
-each real study instead of editing the examples in place.
-
-## Shared runner and fair samples
-
-```python
-from fieldmatch.campaign import load_campaign
-from fieldmatch.comparison import resolve_comparisons, run_comparisons
-
-camp = load_campaign("campaign.yaml")
-specs = resolve_comparisons(camp, "waves")
-results, failures = run_comparisons(camp, specs, formats=("csv", "netcdf"))
-if failures:
-    raise RuntimeError(failures)
-```
-
-For a multi-model study, read the generated NetCDF files and apply explicit
-event/lead restrictions, then:
-
-```python
-from fieldmatch.common import common_sample
-from fieldmatch.pairstats import stats_table
-aligned, counts = common_sample({"analysis": analysis_pairs, "hindcast": hindcast_pairs})
-scores = {name: stats_table(ds) for name, ds in aligned.items()}
-```
-
-The returned counts expose how much each model loses when selecting common
-observations. This helper does not select event phases or confidence intervals.
-
-## Harry exploration with reusable plots
-
-Install the optional notebook dependencies (`pip install -e '.[notebook]'`), then
-open `harry_exploration.ipynb` in Jupyter. Set `DATA_ROOT` to the Harry data tree.
-The notebook uses `harry_campaign.yaml`, writes a resolved campaign next to its
-outputs, runs comparisons, intersects buoy samples explicitly, and makes four
-figures with provenance sidecars. It can redraw saved results by setting
-`RUN_COMPARISONS = False`; stale inputs/configurations are rejected.
-
-For automated execution, `FIELDMATCH_DATA_ROOT` and `FIELDMATCH_OUTPUT` override
-the two notebook paths. These are conveniences for the example, not library
-configuration rules. The original data are not redistributed.
+All scientific choices remain in the YAML or Python script. Example data and
+notebook results from a particular user's installation are not distributed.

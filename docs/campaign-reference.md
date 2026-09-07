@@ -161,4 +161,4 @@ Add definitions inside the existing mappings; do not duplicate YAML root keys.
 Duplicate keys are not currently rejected by the parser. After any campaign edit,
 rerun its comparisons: freshness fingerprints include all comparison declarations,
 not only the group being read. Use a separate campaign/output folder to preserve
-an earlier experiment. See the [sensitivity recipe](analysis-guide.md#9-test-a-scientific-decision-without-losing-the-original).
+an earlier experiment. See the [sensitivity recipe](analysis-guide.md#7-extend-the-scientific-analysis).

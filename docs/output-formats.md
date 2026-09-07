@@ -105,7 +105,7 @@ comparison metadata, plot limits, axes and the figure checksum.
 
 Changing any comparison declaration can invalidate existing results from the
 same campaign; rerun all its comparisons or keep separate campaign versions.
-Reusing only plots (`RUN_COMPARISONS = False` in the Harry notebook) is appropriate
+Reusing only plots (`python /path/to/analyze.py plot`) is appropriate
 when scientific inputs/settings are unchanged. A figure sidecar identifies its
 source result and display settings; keep the analysis code as well to document
 additional sample selection and custom plotting.

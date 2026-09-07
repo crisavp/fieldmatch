@@ -1,11 +1,11 @@
 # Storm Harry, western/central Med, 16-22 Jan 2026.
 # Usage:
 #   fieldmatch scan      config/campaigns/harry.yaml
-#   fieldmatch collocate config/campaigns/harry.yaml jason3 ecmwf_an
+#   fieldmatch collocate config/campaigns/harry.yaml jason3 ecmwf_an --variable hs
 #   fieldmatch stats     /path/to/output.csv
 campaign: harry
-data_root: /home/valladca/WAVEWATCH/harry_storm/data
-outdir: /home/valladca/WAVEWATCH/harry_storm/fieldmatch_out
+data_root: /absolute/path/to/harry/data
+outdir: results
 
 region: {lonmin: -8, lonmax: 36, latmin: 26, latmax: 45}   # = ECMWF grib domain
 period: [2026-01-15, 2026-01-22]

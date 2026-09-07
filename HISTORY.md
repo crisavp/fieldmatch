@@ -1,3 +1,14 @@
+# 0.4.0 — Terminal-first, portable study example
+
+- Replace the primary .ipynb example with analyze.py: inspect, run and plot actions,
+  plus optional VS Code # %% cells. Plotting reuses validated saved comparisons.
+- Resolve CLI configuration paths relative to the script, never the working
+  directory. Interactive execution requires an explicit absolute config path.
+- Document source/wheel installation in existing or new environments. The installer
+  creates new environments or uses the active Python; it never prunes an environment.
+- Replace the notebook extra with interactive (Matplotlib + ipykernel). JupyterLab
+  is not required. Core numerical comparison policies are unchanged.
+
 # 0.3.0 — Grid comparisons and optional plotting
 
 - Add exact-time model/model comparisons on an explicitly chosen reference grid,
@@ -380,7 +391,7 @@ below conda entirely -- a wedged kernel/FUSE or ext4 path-lookup state on
 administers the box.
 
 Note that the *library* is not in doubt: 21 tests pass and every command has
-been run end-to-end against the real Harry data in the `wave-models2`
+been run end-to-end against the real Harry data in an existing scientific Python
 environment. Only the fresh-environment bootstrap is unverified. The timeout
 added in `install.sh` (`MATCHUP_CONDA_TIMEOUT`, default 3600 s) means this
 failure now reports "conda exceeded 3600s and was stopped" with a retry hint

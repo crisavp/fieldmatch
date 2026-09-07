@@ -1,7 +1,7 @@
-# Set data_root in the notebook, or edit it here before using the CLI.
+# Edit data_root once. Relative paths resolve from this YAML file.
 campaign: harry_exploration
-data_root: ../../harry_storm/data
-outdir: results/harry
+data_root: /absolute/path/to/harry/data
+outdir: results
 region: {lonmin: 5, lonmax: 22, latmin: 32, latmax: 42}
 period: [2026-01-18, 2026-01-22]
 matching_defaults:

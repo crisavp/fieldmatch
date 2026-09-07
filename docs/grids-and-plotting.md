@@ -6,7 +6,7 @@ already exist.
 
 FieldMatch 0.3 keeps scientific preparation in the core and plotting in an
 optional module in the same package. Harry-specific experiment selection lives
-in the example notebook and YAML, not in the core.
+in the example script and YAML, not in the core.
 
 ## Select the scientific comparison
 
@@ -95,8 +95,8 @@ no file fingerprint until saved/reopened. Custom Matplotlib artists may need
 extra captions; their complete implementation is not serialized by the sidecar.
 
 The legacy `stats --scatter` command remains compatible. For new figures, use the
-plotting module or the Harry notebook. Install `.[plot]` for Matplotlib only,
-or `.[notebook]` for the Jupyter workflow. Plotting libraries are not imported by
+plotting module or the terminal study script. Install `.[plot]` for Matplotlib,
+or `.[interactive]` for optional VS Code cells. Plotting libraries are not imported by
 the numerical core.
 
 ## Plot function quick reference
@@ -112,4 +112,4 @@ the numerical core.
 Use `ax.set(...)` and ordinary Matplotlib layouts for further customization. The
 helpers infer the variable from the result metadata; choose correct physical
 units and limits for the new variable. Extra analysis filters belong in your
-notebook/script and are not fully reconstructed from a figure sidecar.
+script or interactive cells and are not fully reconstructed from a figure sidecar.

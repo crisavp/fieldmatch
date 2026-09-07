@@ -5,7 +5,7 @@
 ```bash
 conda env create -f environment.yml
 conda activate fieldmatch
-python -m pip install -e .
+python -m pip install -e '.[plot,dev]'
 pytest -q
 ```
 

@@ -4,24 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fieldmatch"
-version = "0.3.0"
+version = "0.4.0"
 description = "Collocate observation products with gridded model fields"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "numpy",
-    "pandas",
-    "xarray",
-    "netcdf4",
-    "cfgrib",       # GRIB engine; needs the eccodes C library (see environment.yml)
-    "pyyaml",
-    "typer",
-    "rich",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "xarray>=2024.1",
+    "netcdf4>=1.6",
+    "cfgrib>=0.9.10",       # GRIB engine; needs the eccodes C library (see environment.yml)
+    "pyyaml>=6",
+    "typer>=0.12",
+    "rich>=13",
 ]
 
 [project.optional-dependencies]
 plot = ["matplotlib"]
-notebook = ["matplotlib", "jupyterlab", "ipykernel"]
+interactive = ["matplotlib", "ipykernel"]
 dev = ["pytest"]
 
 [project.scripts]

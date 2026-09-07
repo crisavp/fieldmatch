@@ -1,8 +1,7 @@
 """`fieldmatch doctor`: verify the installation actually works.
 
-Checks each dependency the hard way -- not `import cfgrib`, but "write a GRIB,
-read it back" -- because the failures that matter (eccodes missing its library,
-a netCDF built without HDF5) only appear at use time. Every failure line says
+Checks imports, a NetCDF write/read round trip, and the GRIB engine/C library.
+A successful engine check does not validate every provider file. Every failure line says
 what to do about it.
 """
 import importlib
@@ -27,7 +26,7 @@ def _python():
     return sys.version.split()[0]
 
 
-@check("core packages", fix="conda env update -n <env> -f environment.yml --prune")
+@check("core packages", fix="python -m pip install /path/to/fieldmatch   # use the supplied source folder")
 def _imports():
     versions = []
     for mod in ("numpy", "pandas", "xarray", "yaml", "typer", "rich"):
@@ -69,7 +68,7 @@ def _grib():
     return f"cfgrib {cfgrib.__version__}, eccodes C library {ver}"
 
 
-@check("fieldmatch package", fix="pip install -e .   (from the repo directory)")
+@check("fieldmatch package", fix="python -m pip install .   (from the source folder)")
 def _self():
     from . import campaign, collocate_track, models, pairstats, readers, scan  # noqa: F401
     from .readers import READERS
