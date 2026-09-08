@@ -75,8 +75,14 @@ def comparison_panels(ds, time, *, clim=None, difference_limit=None, figsize=(15
     stamp=np.datetime64(time,'ns')
     if stamp not in ds.time.values:
         raise ValueError('requested timestamp is absent; choose an exact comparison time')
+    # Side-by-side comparison uses the common finite footprint even though the
+    # saved source fields retain their independent availability.
+    common=np.isfinite(ds.difference)
+    view=ds.copy(deep=False)
+    for field in ('reference','candidate'):
+        view[field]=ds[field].where(common)
     if clim is None and definition(ds.attrs['variable']) not in DIRECTION_VARS:
-        values=np.concatenate([ds[v].sel(time=stamp).values.ravel() for v in ['reference','candidate']])
+        values=np.concatenate([view[v].sel(time=stamp).values.ravel() for v in ['reference','candidate']])
         values=values[np.isfinite(values)]
         if not values.size:raise ValueError('no common finite cells at requested time')
         clim=(float(values.min()),float(values.max()))
@@ -85,7 +91,7 @@ def comparison_panels(ds, time, *, clim=None, difference_limit=None, figsize=(15
     fig,axes=plt.subplots(1,3,figsize=figsize,constrained_layout=True)
     for field,ax in zip(['reference','candidate','difference'],axes):
         limits=clim if field!='difference' else None if difference_limit is None else (-difference_limit,difference_limit)
-        field_map(ds,stamp,field=field,ax=ax,clim=limits)
+        field_map(view,stamp,field=field,ax=ax,clim=limits)
     return fig,axes
 
 

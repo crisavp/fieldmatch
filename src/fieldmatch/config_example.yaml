@@ -27,6 +27,7 @@ datasets:
     kind: altimeter_cmems    # CMEMS L3 flat along-track time axis
     path: 'cmems/*.nc'
     extra_vars: []           # default none; string or list of source fields
+    retain_qc: false         # true keeps x_hs_unfiltered for sensitivity analysis
     # Outputs: hs, hs_unfiltered, wind_speed. Upstream editing only.
     # No configurable coastal filter: this product lacks the needed fields.
 
@@ -37,6 +38,7 @@ datasets:
     min_dist_coast_km: 30   # default 30 km; 0 disables distance filtering
     open_ocean_only: true   # default true; false disables surface-type filtering
     extra_vars: []          # source fields on time_01 only; not 20 Hz variables
+    retain_qc: false        # true keeps canonical coast/surface/rain/ice/quality fields
     # Quality flags are applied when available; no configurable qc switch.
     # Missing coastal/surface fields are recorded as filters NOT applied.
 
@@ -48,20 +50,24 @@ datasets:
     min_dist_coast_km: 30   # 0 disables distance filtering
     open_ocean_only: true   # false disables surface-type filtering
     extra_vars: []          # [] default; e.g. ['ku:swh_ocean', 'c:swh_ocean']
+    retain_qc: false        # true keeps canonical quality/coast/surface/rain/ice fields
     # Unqualified names refer to data_01. ku: and c: select the band groups.
     # Quality flags apply to swh/sig0 when present; wind has no local quality flag filter.
 
   sar:
     kind: sentinel1          # Sentinel-1 OCN OWI wind grid
     path: 's1/*.nc'
-    qc: true               # default true: quality and owiMask filtering
-    extra_vars: []         # source fields on (owiAzSize, owiRaSize)
-    # qc: false disables BOTH wind quality and land/ice/no-data/RFI masks.
+    wind_quality: [acceptable, good] # explicit default accepted meanings
+    surface_mask: [valid]            # explicit default accepted meanings
+    extra_vars: []          # source fields on (owiAzSize, owiRaSize)
+    retain_qc: false        # true keeps x_wind_quality/x_surface_mask/x_inversion_quality
+    # `fieldmatch scan` lists the meanings and counts available in your files.
 
   scatterometer:
     kind: ascat             # ASCAT L2; NUMROWS x NUMCELLS
     path: 'ascat/*.nc'
     extra_vars: []          # source fields on (NUMROWS, NUMCELLS)
+    retain_qc: false        # true keeps wvc_quality_flag as x_wind_quality
     # Fixed QC: wvc_quality_flag <65536; no YAML qc switch.
     # One timestamp per swath row is required; direction converted +180 deg.
 
@@ -70,7 +76,7 @@ datasets:
     path: 'buoy.csv'
     lat: 36.0764            # REQUIRED latitude, degrees [-90,90]
     lon: 15.4018            # REQUIRED longitude, degrees [-180,180]
-    # No extra_vars/rename/qc options. Known export headers are mapped internally.
+    # No extra_vars/rename/QC options. Known export headers are mapped internally.
     # All-zero columns can mean absent sensors and are dropped by this reader.
 
   model:
@@ -80,10 +86,11 @@ datasets:
     coords: {}              # default {}; raw coordinate -> time/lat/lon
     # Example coords: {latitude: lat, longitude: lon, valid_time: time}
     init: null              # default null; or quoted initialization '2026-01-18T00'
+    init_cycle: null        # default null; or recurring UTC cycle '00:00'
     lead: null              # default null; or 24, or '12-35' hours since init
-    # A non-null lead takes precedence over init; select one strategy deliberately.
+    # init/init_cycle filters first, then lead. Use either init or init_cycle.
     lead_tol: 0             # >=0 hours; default 0 = no nearest-lead fallback
-    overlap: error          # error (default) | shortest_lead for duplicate valid times
+    # Distinct forecasts producing the same valid time are always rejected.
     # swh -> hs is normalized BEFORE rename. No automatic unit conversion.
     # Only rectilinear 1-D lat/lon grids; loaders do not reconcile different grids.
 
@@ -93,9 +100,9 @@ datasets:
     rename: {}
     coords: {}
     init: null
+    init_cycle: null
     lead: null
     lead_tol: 0
-    overlap: error
 
 comparisons:
   # Observation group: ONLY obs, model, variables are accepted here.
@@ -116,16 +123,18 @@ comparisons:
     # No obs_variable/model_variable keys in this block; direct source selection
     # is available through advanced collocate/Python API.
 
-  # Grid group: ONLY reference, model, time_basis, variables are accepted here.
+  # Grid group: reference, model, variables and optional forecast_pairing.
   models:
     reference: model        # target grid and subtracted field
     model: other_model      # difference = this model minus reference
-    time_basis: valid_time  # valid_time | same_init | same_lead; all use exact times
+    # Required when both selected views are forecasts:
+    # same_forecast requires equal init/lead; same_valid_time explicitly allows different ages.
+    # forecast_pairing: same_forecast
     variables:
       hs:
         space_method: bilinear
         missing_corners: reject_nonzero_weight
         direction_resultant_min: 1.0e-10
         wind_direction_min_speed: 1.0e-10
-    # No time tolerance or time_tie keys for grids. same_init/same_lead also
-    # require equal finite initialization/lead coordinates at common valid times.
+    # Grid comparisons use exact common valid times from the dataset views.
+    # No time tolerance or time_tie keys are accepted for grids.

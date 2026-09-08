@@ -14,7 +14,11 @@ datasets:
   forecast:
     kind: grib
     path: forecasts/forecast_*.grib
+    # Select a concrete forecast view. For one run, replace init_cycle with
+    # init: '2026-01-18T00:00'. Initialization and lead filters combine.
+    init_cycle: "00:00"
+    lead: 12-35
 
 # Examples:
+#   fieldmatch collocate examples/forecast_campaign.yaml buoy forecast --variable hs
 #   fieldmatch collocate examples/forecast_campaign.yaml buoy forecast --variable hs --lead 24
-#   fieldmatch collocate examples/forecast_campaign.yaml buoy forecast --variable hs --lead 12-35

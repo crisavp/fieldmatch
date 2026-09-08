@@ -33,7 +33,7 @@ from .readers import READERS
 
 MODEL_KINDS = {"grib": "cfgrib", "netcdf": "netcdf4"}
 
-MODEL_OPTIONS = {"init", "lead", "lead_tol", "rename", "coords", "overlap"}
+MODEL_OPTIONS = {"init", "init_cycle", "lead", "lead_tol", "rename", "coords"}
 
 
 @dataclass
@@ -177,11 +177,25 @@ def _validate_options(name, kind, opts):
     for key in ("rename", "coords"):
         if key in opts and not isinstance(opts[key], dict):
             raise ValueError(f"dataset {name!r}: {key} must be a mapping")
-    for key in ("qc", "open_ocean_only"):
+    for key in ("open_ocean_only", "retain_qc"):
         if key in opts and not isinstance(opts[key], bool):
             raise ValueError(f"dataset {name!r}: {key} must be true or false")
-    if opts.get("overlap", "error") not in {"error", "shortest_lead"}:
-        raise ValueError("overlap must be error or shortest_lead")
+    for key in ("wind_quality", "surface_mask"):
+        if key in opts:
+            value = opts[key]
+            values = [value] if isinstance(value, str) else value
+            if (not isinstance(values, list) or not values
+                    or not all(isinstance(item, str) for item in values)):
+                raise ValueError(
+                    f"dataset {name!r}: {key} must be a nonempty string or string list")
+    if kind in MODEL_KINDS:
+        from .models import parse_init_cycle, parse_lead
+        if opts.get("init") is not None and opts.get("init_cycle") is not None:
+            raise ValueError(f"dataset {name!r}: select either init or init_cycle, not both")
+        if opts.get("init_cycle") is not None:
+            parse_init_cycle(opts["init_cycle"])
+        if opts.get("lead") is not None:
+            parse_lead(opts["lead"])
     if "lead_tol" in opts and (not np.isfinite(float(opts["lead_tol"])) or float(opts["lead_tol"]) < 0):
         raise ValueError(f"dataset {name!r}: lead_tol cannot be negative")
     if "extra_vars" in opts:
@@ -331,7 +345,8 @@ def combine_provenance(clouds):
     out = {}
     for ds in clouds:
         for k, v in ds.attrs.items():
-            if k in COUNT_ATTRS:
+            if (k in COUNT_ATTRS or k.startswith("n_flagged_")
+                    or k.startswith("n_newly_masked_")):
                 out[k] = out.get(k, 0) + int(v)
             elif k not in out:
                 out[k] = v

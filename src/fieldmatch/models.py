@@ -8,8 +8,9 @@ Standard form handed to collocation:
 Layout quirks handled here:
 - analysis/hindcast/ERA5: one variable per file, (time, lat, lon) -> merged.
 - forecast:  (step, lat, lon) with a scalar init time -> valid_time becomes
-  the time axis (one dataset per init; pass `init` to pick among files).
-- AIFS:      (time, step, lat, lon), many inits -> `init` selects one.
+  the time axis (one dataset per init).
+- AIFS:      (time, step, lat, lon), many inits -> `init` or `init_cycle`
+  filters initialization times, then `lead` filters forecast steps.
 
 Variables sampled at different cadences (hourly waves vs 6-hourly winds) are
 outer-joined; missing steps are NaN and the collocation's per-variable time
@@ -17,6 +18,7 @@ tolerance deals with them.
 """
 import glob as _glob
 import os
+import re
 import warnings
 
 import numpy as np
@@ -41,7 +43,7 @@ def _hours(td):
     return np.asarray(td) / np.timedelta64(1, "h")
 
 
-def _combine_parts(parts, overlap):
+def _combine_parts(parts):
     """Combine time partitions with no implicit regridding or conflict override."""
     reference = parts[0]
     for p in parts[1:]:
@@ -73,11 +75,13 @@ def _combine_parts(parts, overlap):
             sub = ds.isel(time=ix)
             distinct = len(np.unique(sub.init.values)) > 1
             if distinct:
-                if overlap != "shortest_lead":
-                    raise ValueError(f"conflicting forecast provenance for {name} at {time}; "
-                                     "select an init/lead or set overlap: shortest_lead")
-                sub = sub.isel(time=np.flatnonzero(sub.lead_hours.values == sub.lead_hours.min().item()))
-                warnings.warn(f"{name} at {time}: explicitly selected shortest lead")
+                provenance = sorted({
+                    (str(np.datetime64(i, "ns")), float(lead))
+                    for i, lead in zip(sub.init.values, sub.lead_hours.values)
+                })
+                raise ValueError(
+                    f"duplicate valid time {time} for {name} from distinct forecasts "
+                    f"{provenance}; narrow init/init_cycle or lead so valid times are unique")
             # Duplicate deliveries may fill missing cells, but disagreeing finite cells fail.
             try:
                 pieces.append(xr.merge([sub.isel(time=[i]) for i in range(sub.sizes["time"])],
@@ -123,6 +127,41 @@ def parse_lead(spec):
     if not np.isfinite([lo, hi]).all() or lo < 0 or hi < lo:
         raise ValueError(f"lead window {lo}-{hi} h is empty (max < min)")
     return lo, hi
+
+
+def parse_init_cycle(spec):
+    """Parse a recurring UTC initialization cycle written as ``HH:MM``."""
+    if not isinstance(spec, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", spec):
+        raise ValueError("init_cycle must be a UTC time in HH:MM form, for example '00:00'")
+    hour, minute = map(int, spec.split(":"))
+    return hour * 60 + minute
+
+
+def _select_inits(ds, *, coordinate, init=None, init_cycle=None):
+    """Filter a scalar or time-dimensional initialization coordinate."""
+    if init is None and init_cycle is None:
+        return ds
+    values = np.atleast_1d(ds[coordinate].values).astype("datetime64[ns]")
+    if init is not None:
+        try:
+            requested = np.datetime64(init, "ns")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid initialization timestamp {init!r}") from exc
+        keep = values == requested
+        description = f"initialization {requested}"
+    else:
+        cycle_minutes = parse_init_cycle(init_cycle)
+        midnight = values.astype("datetime64[D]").astype("datetime64[ns]")
+        offsets = values - midnight
+        keep = offsets == np.timedelta64(cycle_minutes, "m")
+        description = f"initialization cycle {init_cycle} UTC"
+    if not keep.any():
+        raise _EmptySelection(f"{description} is absent")
+    if ds[coordinate].dims == ():
+        return ds
+    if ds[coordinate].dims != ("time",):
+        raise ValueError(f"{coordinate} must be scalar or defined on the time dimension")
+    return ds.isel(time=np.flatnonzero(keep))
 
 
 def _select_lead(ds, window, tol_hours):
@@ -239,19 +278,29 @@ class _EmptySelection(ValueError):
     """This file does not contain the explicitly requested initialization/lead."""
 
 
-def _standardize(ds, init=None, lead=None, lead_tol=0.0, coords=None):
+def _standardize(ds, init=None, init_cycle=None, lead=None, lead_tol=0.0, coords=None):
     """Normalize analysis, scalar-step and multi-step forecasts to valid time."""
     ds = ds.rename(_coordinate_names(ds, coords))
+    # Operational analysis GRIB commonly carries a scalar zero ``step`` over
+    # a series of valid times. It is not a forecast trajectory. A scalar step
+    # attached to one initialization remains forecast provenance.
+    analysis_step = (
+        "step" in ds.coords and "step" not in ds.dims
+        and "time" in ds.dims and ds.sizes["time"] > 1
+        and float(_hours(ds.step.values)) == 0
+        and init is None and init_cycle is None and lead is None
+    )
+    time_kind = ("forecast" if ("step" in ds.coords and not analysis_step) or
+                 ("init" in ds.coords and "lead_hours" in ds.coords)
+                 else "valid_time_only")
     if "step" in ds.coords:
         expected = ds["time"] + ds["step"]
         if "valid_time" in ds.coords and not bool((ds.valid_time == expected).all()):
             raise ValueError("valid_time disagrees with initialization + forecast step")
         ds = ds.assign_coords(valid_time=expected)
-        if init is not None and lead is None:
-            if not np.any(ds.time.values == np.datetime64(init)):
-                raise _EmptySelection(f"initialization {init} is absent")
-            if "time" in ds.dims:
-                ds = ds.sel(time=np.datetime64(init))
+        ds = _select_inits(ds, coordinate="time", init=init, init_cycle=init_cycle)
+        if init is not None and "time" in ds.dims:
+            ds = ds.isel(time=0)
         if "step" not in ds.dims:
             step = float(_hours(ds.step.values))
             if lead is not None:
@@ -268,9 +317,12 @@ def _standardize(ds, init=None, lead=None, lead_tol=0.0, coords=None):
             ds = _tag(ds, inits, step)
         elif lead is not None:
             ds = _select_lead(ds, parse_lead(lead), lead_tol)
+        elif init_cycle is not None:
+            steps = _hours(ds["step"].values)
+            ds = _select_lead(ds, (float(steps.min()), float(steps.max())), 0.)
         elif "time" in ds.dims:
             raise ValueError("dataset holds several forecast inits AND lead steps; "
-                             "select init or lead explicitly")
+                             "select init, init_cycle or lead explicitly")
         else:
             init_t = np.datetime64(ds.time.values)
             steps = _hours(ds.step.values)
@@ -283,11 +335,14 @@ def _standardize(ds, init=None, lead=None, lead_tol=0.0, coords=None):
         if ("init" in ds.coords) != ("lead_hours" in ds.coords):
             raise ValueError("model provenance requires both init and lead_hours")
         if "init" not in ds.coords:
+            if init is not None or init_cycle is not None or lead is not None:
+                raise ValueError(
+                    "forecast selectors require embedded initialization and lead metadata; "
+                    "this dataset contains valid times only")
             ds = _tag(ds, ds.time.values, 0.)
         else:
             ds = _tag(ds, ds.init.values, ds.lead_hours.values)
-        if init is not None and lead is None:
-            ds = ds.isel(time=np.flatnonzero(ds.init.values == np.datetime64(init)))
+        ds = _select_inits(ds, coordinate="init", init=init, init_cycle=init_cycle)
         if lead is not None:
             lo, hi = parse_lead(lead)
             distance = np.maximum(lo-ds.lead_hours.values, np.maximum(ds.lead_hours.values-hi, 0))
@@ -311,12 +366,13 @@ def _standardize(ds, init=None, lead=None, lead_tol=0.0, coords=None):
             raise ValueError(f"model {axis} coordinate must be finite and unique")
     if np.isnat(ds.time.values).any():
         raise ValueError("model time contains NaT")
+    ds.attrs["fieldmatch_time_kind"] = time_kind
     return ds.sortby("lat").sortby("lon").sortby("time")
 
 
-def open_model(paths, engine="cfgrib", init=None, lead=None, lead_tol=0.0,
+def open_model(paths, engine="cfgrib", init=None, init_cycle=None, lead=None, lead_tol=0.0,
                rename=None, coords=None, bbox=None, period=None, time_pad=None,
-               overlap="error", variables=None):
+               variables=None):
     """Open + merge model files (glob patterns or explicit list) -> one cube.
 
     Files may each hold a different variable (ECMWF one-param-per-file dumps);
@@ -324,18 +380,20 @@ def open_model(paths, engine="cfgrib", init=None, lead=None, lead_tol=0.0,
     whenever u10 & v10 are present.
 
     Forecast datasets carry two extra time coordinates, `init` and
-    `lead_hours`, and are resolved one of two ways:
+    `lead_hours`. Initialization and lead selectors are independent filters:
 
-    - `init=<timestamp>`: follow ONE forecast across all its lead times.
-    - `lead=<hours>`: constant-lead slice across ALL inits in the glob -- the
-      standard forecast-verification view (`lead_tol` bounds the search when
-      the exact step is absent).
+    - `init=<timestamp>` selects one exact initialization.
+    - `init_cycle="HH:MM"` selects that recurring UTC initialization cycle.
+    - `lead=<hours>` selects a lead or lead window after initialization filtering
+      (`lead_tol` bounds fallback when no step lies in the requested window).
 
-    Mixing many inits without choosing is refused rather than silently
-    averaging leads together.
+    Distinct forecasts may never produce duplicate valid times in one loaded
+    view. Narrow the selectors if their valid-time ranges overlap.
     """
-    if overlap not in {"error", "shortest_lead"}:
-        raise ValueError("overlap must be error or shortest_lead")
+    if init is not None and init_cycle is not None:
+        raise ValueError("select either init or init_cycle, not both")
+    if init_cycle is not None:
+        parse_init_cycle(init_cycle)
     if not np.isfinite(lead_tol) or lead_tol < 0:
         raise ValueError("lead_tol must be finite and nonnegative")
     if isinstance(paths, (str, os.PathLike)):
@@ -344,6 +402,7 @@ def open_model(paths, engine="cfgrib", init=None, lead=None, lead_tol=0.0,
     if not files:
         raise FileNotFoundError(f"no model files match: {paths}")
     parts = []
+    empty_selections = []
     for f in files:
         for part in _open_one(f, engine):
             from .quantities import annotate
@@ -359,15 +418,23 @@ def open_model(paths, engine="cfgrib", init=None, lead=None, lead_tol=0.0,
                 part = part[selected]
             try:
                 part = _subset_campaign(
-                    _standardize(part, init=init, lead=lead, lead_tol=lead_tol, coords=coords),
+                    _standardize(part, init=init, init_cycle=init_cycle, lead=lead,
+                                 lead_tol=lead_tol, coords=coords),
                     bbox=bbox, period=period, time_pad=time_pad)
-            except _EmptySelection:
+            except _EmptySelection as exc:
+                empty_selections.append(str(exc))
                 continue
             if all(part.sizes.get(d, 0) > 0 for d in ("time", "lat", "lon")):
                 parts.append(part)
     if not parts:
-        raise ValueError("model has no selected fields/times covering the campaign region and period")
-    ds = _combine_parts(parts, overlap)
+        detail = f": {'; '.join(sorted(set(empty_selections)))}" if empty_selections else ""
+        raise ValueError(
+            "model has no selected fields/times covering the campaign region and period" + detail)
+    time_kinds = {part.attrs.get("fieldmatch_time_kind") for part in parts}
+    if len(time_kinds) != 1:
+        raise ValueError("model files mix forecast and valid-time-only time structures")
+    ds = _combine_parts(parts)
+    ds.attrs["fieldmatch_time_kind"] = time_kinds.pop()
     # GRIB shortName -> the obs-side canonical name (readers.py), then user map.
     ds = ds.rename({k: v for k, v in {"swh": "hs"}.items() if k in ds})
     if rename:

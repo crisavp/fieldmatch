@@ -8,7 +8,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from fieldmatch.readers import s1_good_quality_values
+from fieldmatch.readers import (_select_flag_meanings, _selected_mask_bits,
+                                s1_good_quality_values)
 
 IPF003 = {"flag_values": np.array([0, 1, 2, 3], dtype="int8"),
           "flag_meanings": "good medium low poor"}
@@ -31,6 +32,33 @@ def test_modern_convention_keeps_four_and_three():
 def test_missing_metadata_falls_back_to_legacy():
     with pytest.warns(UserWarning, match="flag_meanings"):
         assert s1_good_quality_values(_flag({})) == [0]
+
+
+def test_explicit_meanings_are_translated_from_product_metadata():
+    values, names = _select_flag_meanings(
+        _flag(IPF004), ["acceptable", "good"], "wind_quality")
+    assert values == [3, 4]
+    assert names == ["acceptable", "good"]
+
+
+def test_meaning_missing_from_one_processor_is_reported_but_compatible():
+    with pytest.warns(UserWarning, match="acceptable"):
+        values, names = _select_flag_meanings(
+            _flag(IPF003), ["acceptable", "good"], "wind_quality")
+    assert values == [0] and names == ["good"]
+
+
+def test_selection_with_no_available_meaning_fails_loudly():
+    with pytest.raises(ValueError, match="no available meanings"):
+        _select_flag_meanings(_flag(IPF003), ["acceptable"], "wind_quality")
+
+
+def test_surface_mask_accepts_combinations_of_selected_bits():
+    flag = xr.DataArray(np.array([0, 1, 4, 5, 16], dtype="int8"), name="owiMask")
+    assert _selected_mask_bits(flag, [0, 1, 4]).tolist() == [
+        True, True, True, True, False]
+    assert _selected_mask_bits(flag, [0]).tolist() == [
+        True, False, False, False, False]
 
 
 # ── coastal / open-sea masking (TODO item 4) ────────────────────────────────
@@ -93,6 +121,20 @@ def test_missing_quality_flag_is_recorded_as_unfiltered():
     assert prov["a_filter"] == "present_qual == 0"
     assert prov["b_filter"].startswith("none (absent_qual not present")
     assert n == 1 and np.isnan(vals["a"][1])
+    assert prov["n_flagged_a_quality"] == 1
+    assert prov["n_newly_masked_a_quality"] == 1
+
+
+def test_quality_rejection_count_is_record_union_not_sum_across_variables():
+    from fieldmatch.readers import _qc_by_flag
+    src = xr.Dataset({"a_qual": ("t", [0, 1, 1]),
+                      "b_qual": ("t", [0, 0, 1])})
+    values = {"a": np.ones(3), "b": np.ones(3)}
+    _, prov, rejected = _qc_by_flag(
+        src, values, (("a", "a_qual"), ("b", "b_qual")))
+    assert rejected == 2
+    assert prov["n_flagged_a_quality"] == 2
+    assert prov["n_flagged_b_quality"] == 1
 
 
 def test_partially_available_coastal_filter_is_explicit():

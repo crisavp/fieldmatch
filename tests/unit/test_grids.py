@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from fieldmatch.forecast import forecast_table
 from fieldmatch.grids import compare_grids,grid_stats
 
 
@@ -12,7 +13,7 @@ def cube(lat=(0.,1.),lon=(0.,1.),times=('2026-01-01','2026-01-01T06'),name='hs',
 
 
 def compare(a,b,v='hs',**kw):
-    return compare_grids(a,b,v,space_method=kw.pop('space_method','bilinear'),time_basis=kw.pop('time_basis','valid_time'),**kw)
+    return compare_grids(a,b,v,space_method=kw.pop('space_method','bilinear'),**kw)
 
 
 def test_planar_field_exact_regridding_and_difference_sign():
@@ -20,23 +21,30 @@ def test_planar_field_exact_regridding_and_difference_sign():
     result=compare(a,b)
     np.testing.assert_allclose(result.difference,2)
     np.testing.assert_allclose(result.reference,a.hs)
-    assert result.n_common.values.tolist()==[4,4]
     stats=grid_stats(result)
+    assert stats.n_common.values.tolist()==[4,4]
+    assert list(stats.coords)==['time']
+    assert set(stats.data_vars)=={'mean_difference','rms_difference','valid_area_fraction','n_common'}
     np.testing.assert_allclose(stats.mean_difference,2);np.testing.assert_allclose(stats.rms_difference,2)
     assert result.attrs['time_method']=='exact'
+    assert set(result.data_vars)=={'reference','candidate','difference'}
 
 
-def test_no_temporal_nearest_fallback_and_forecast_basis():
+def test_no_temporal_nearest_fallback_and_forecast_provenance_is_recorded():
     a=cube();b=cube(times=('2026-01-01T00:01','2026-01-01T06'))
     a=a.assign_coords(init=('time',pd.to_datetime(['2025-12-31','2025-12-31'])),lead_hours=('time',[24.,30.]))
     b=b.assign_coords(init=('time',pd.to_datetime(['2026-01-01','2026-01-01'])),lead_hours=('time',[1/60,6.]))
-    ds=compare(a,b)
-    assert ds.sizes['time']==1 and ds.candidate_lead_hours.item()==6
-    for basis in ['same_init','same_lead']:
-        with pytest.raises(ValueError,match='no exact common'):compare(a,b,time_basis=basis)
+    with pytest.raises(ValueError,match='forecast_pairing'):
+        compare(a,b)
+    ds=compare(a,b,forecast_pairing='same_valid_time')
+    assert ds.sizes['time']==1
+    assert set(ds.coords)=={'time','lat','lon'}
+    provenance=forecast_table(ds)
+    assert dict(zip(provenance.side,provenance.lead_hours))=={'candidate':6,'reference':30}
+    assert provenance.init.nunique()==2
+    assert list(grid_stats(ds).coords)==['time']
     b=b.assign_coords(init=('time',pd.to_datetime(['2025-12-31','2025-12-31'])),lead_hours=('time',[24+1/60,30.]))
-    for basis in ['same_init','same_lead']:assert compare(a,b,time_basis=basis).sizes['time']==1
-    with pytest.raises(ValueError,match='requires a init'):compare(cube(),b,time_basis='same_init')
+    assert compare(a,b,forecast_pairing='same_forecast').sizes['time']==1
 
 
 def test_masks_exact_wet_nodes_extrapolation_and_zero_common_time():
@@ -44,11 +52,16 @@ def test_masks_exact_wet_nodes_extrapolation_and_zero_common_time():
     b.hs.values[:,1,1]=np.nan
     b.hs.values[1]=np.nan
     ds=compare(a,b)
-    assert ds.valid.sel(time=ds.time[0],lat=0,lon=0).item()==1
-    assert ds.valid.sel(time=ds.time[0],lat=.5,lon=.5).item()==0
-    assert not ds.valid.sel(lat=1.5).any()
-    assert ds.n_common[1]==0 and np.isnan(grid_stats(ds).rms_difference[1])
-    np.testing.assert_array_equal(np.isfinite(ds.difference),ds.valid==1)
+    common=np.isfinite(ds.reference)&np.isfinite(ds.candidate)
+    assert common.sel(time=ds.time[0],lat=0,lon=0).item()
+    assert not common.sel(time=ds.time[0],lat=.5,lon=.5).item()
+    assert not common.sel(lat=1.5).any()
+    # Independent source availability is retained even where comparison is absent.
+    assert np.isfinite(ds.reference.sel(time=ds.time[0],lat=.5,lon=.5))
+    assert not np.isfinite(ds.candidate.sel(time=ds.time[0],lat=.5,lon=.5))
+    stats=grid_stats(ds)
+    assert stats.n_common[1]==0 and np.isnan(stats.rms_difference[1])
+    np.testing.assert_array_equal(np.isfinite(ds.difference),common)
 
 
 def test_circular_seam_cancellation_units_and_wind_components():
@@ -57,7 +70,7 @@ def test_circular_seam_cancellation_units_and_wind_components():
     b=b.rename(mwd='wave_dir')
     ds=compare(a,b,'wave_dir');np.testing.assert_allclose(ds.difference,20,atol=1e-12)
     b.wave_dir.values[:]=[[90,270],[90,270]]
-    ds=compare(a,b,'wave_dir');assert ds.valid.sel(lat=.5,lon=.5).sum()==0
+    ds=compare(a,b,'wave_dir');assert not np.isfinite(ds.difference.sel(lat=.5,lon=.5)).any()
     b.wave_dir.attrs['units']='radians'
     with pytest.raises(ValueError,match='units'):compare(a,b,'wave_dir')
     # Wind interpolates components before speed; cancellation does not become strong wind.
@@ -65,7 +78,7 @@ def test_circular_seam_cancellation_units_and_wind_components():
     b=cube().rename(hs='u10');b.u10.attrs['units']='m s-1';b.u10.values[:]=[[-1,1],[-1,1]]
     b['v10']=xr.zeros_like(b.u10);b.v10.attrs['units']='m s-1'
     speed=compare(a,b,'wind_speed');assert speed.candidate.sel(lat=.5,lon=.5).max()==0
-    direction=compare(a,b,'wind_dir');assert not direction.valid.sel(lat=.5,lon=.5).any()
+    direction=compare(a,b,'wind_dir');assert not np.isfinite(direction.difference.sel(lat=.5,lon=.5)).any()
 
 
 def test_nearest_and_bilinear_are_explicit_distinct_choices():

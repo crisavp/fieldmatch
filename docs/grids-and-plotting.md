@@ -15,7 +15,7 @@ from fieldmatch.grids import compare_grids, grid_stats
 
 result = compare_grids(analysis, era5, 'hs',
     reference_name='analysis', candidate_name='ERA5',
-    space_method='bilinear', time_basis='valid_time')
+    space_method='bilinear')
 summary = grid_stats(result)
 ```
 
@@ -23,26 +23,22 @@ Inputs are normalized xarray model datasets with increasing, unique time/lat/lon
 coordinates, fields ordered (time, lat, lon), and compatible physical metadata.
 Use `open_model` to normalize GRIB/NetCDF first. The first dataset defines the
 reference grid. Fields on the second grid are sampled onto it; a finer target
-grid does not create finer physical resolution. Both output fields use exactly
-the common finite mask at each retained time. Missing contributing corners are
+grid does not create finer physical resolution. The saved reference and candidate
+retain their independent finite coverage. Differences, statistics, and comparison
+panels use their common finite footprint. Missing contributing corners are
 rejected, zero-weight corners ignored and spatial extrapolation prohibited.
 Directions are circular; atmospheric wind derives from interpolated components
 when u10/v10 are available. The same sampler serves observation matching.
 
 Select `space_method='bilinear'` or `'nearest'` explicitly in Python. YAML grid
 groups inherit the documented spatial defaults from `matching_defaults`.
-`time_basis` is always explicit:
-
-| Basis | Selection at exact common valid times |
-|---|---|
-| `valid_time` | No extra initialization/lead equality restriction; use for analysis/reference consistency |
-| `same_init` | Both initializations must be present, finite and equal |
-| `same_lead` | Both lead coordinates must be present, finite and equal |
-
-These filters do not create a lead-time skill curve. At the same valid time,
-equal lead normally implies equal initialization. To investigate different lead
-windows, select those windows explicitly before comparison. A single forecast
-should first be selected using the dataset's `init` or `lead` options.
+Dataset `init`, `init_cycle` and `lead` options select concrete forecast views
+before comparison. The comparison then joins exact common valid times. When both
+views are forecasts, pass `forecast_pairing='same_forecast'` to require equal
+initialization/lead or `forecast_pairing='same_valid_time'` to explicitly allow
+different forecast ages. Actual initialization and lead are stored as compact
+provenance rather than visible result fields; call `forecast_table(result)` to
+expand them. Valid-time-only sources do not invent forecast provenance.
 Temporal interpolation and nearest-time matching are deliberately absent here.
 No shared times or no shared finite cells produces an explicit error.
 

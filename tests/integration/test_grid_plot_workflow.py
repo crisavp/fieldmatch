@@ -18,7 +18,7 @@ def campaign(tmp_path):
     c=dict(campaign='grid.test',region=dict(latmin=0,latmax=1,lonmin=0,lonmax=1),period=['2026-01-01','2026-01-01'],
            datasets={n:dict(kind='netcdf',path=f'{n}.nc') for n in ['ref','other']},
            matching_defaults=dict(tolerance_minutes=30),
-           comparisons={'difference':dict(reference='ref',model='other',time_basis='valid_time',variables={'hs':{}})})
+           comparisons={'difference':dict(reference='ref',model='other',variables={'hs':{}})})
     p=tmp_path/'campaign.yaml';p.write_text(yaml.safe_dump(c));return p
 
 
@@ -27,7 +27,7 @@ def test_cli_grid_output_roundtrip_and_manifest(tmp_path):
     r=runner.invoke(app,['compare',str(p),'difference','--describe']);assert r.exit_code==0,r.output
     assert 'exact' in r.output and 'tolerance minutes' not in r.output
     r=runner.invoke(app,['compare',str(p),'difference','--format','both']);assert r.exit_code==0,r.output
-    path=tmp_path/'fieldmatch_out/grid.test_ref_x_other_hs_difference.nc'
+    path=tmp_path/'fieldmatch_out/difference__hs.nc'
     ds=open_result(path);np.testing.assert_allclose(ds.difference,2)
     assert validate_output_manifest(path)[0]
     info = runner.invoke(app, ['info', str(path)])
@@ -51,7 +51,7 @@ def test_plotting_preserves_data_uses_exact_time_and_records_provenance(tmp_path
     from fieldmatch import plotting
     import matplotlib.pyplot as plt
     p=campaign(tmp_path);r=CliRunner().invoke(app,['compare',str(p),'difference']);assert r.exit_code==0,r.output
-    ds=open_result(tmp_path/'fieldmatch_out/grid.test_ref_x_other_hs_difference.nc');before=ds.copy(deep=True)
+    ds=open_result(tmp_path/'fieldmatch_out/difference__hs.nc');before=ds.copy(deep=True)
     fig,axes=plotting.comparison_panels(ds,'2026-01-01',clim=(0,10),difference_limit=3)
     path=plotting.save_figure(fig,tmp_path/'panels.png')
     assert path.exists();rec=json.loads((tmp_path/'.fieldmatch/panels.png.figure.json').read_text())
@@ -75,7 +75,7 @@ def test_plotting_preserves_data_uses_exact_time_and_records_provenance(tmp_path
 def test_grid_statistics_cli_and_stale_result_rejection(tmp_path):
     p=campaign(tmp_path);runner=CliRunner()
     r=runner.invoke(app,['compare',str(p),'difference','--format','both']);assert r.exit_code==0,r.output
-    path=tmp_path/'fieldmatch_out/grid.test_ref_x_other_hs_difference.nc'
+    path=tmp_path/'fieldmatch_out/difference__hs.nc'
     r=runner.invoke(app,['stats',str(path)]);assert r.exit_code==0,r.output
     assert 'rms_difference' in r.output
     r=runner.invoke(app,['stats',str(path.with_suffix('.csv'))]);assert r.exit_code!=0

@@ -1,5 +1,6 @@
 """Regression tests for campaign workflow correctness and provenance."""
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,8 @@ from fieldmatch.collocate_track import NoUsableModelValues, collocate_track, wri
 from fieldmatch.models import open_model
 from fieldmatch.pairstats import pair_stats
 from fieldmatch.readers import _cloud, _collect_extras, read_ascat, read_buoy_ispra
-from fieldmatch.scan import var_cadences
+from fieldmatch.scan import (_add_quality_inventory, format_report,
+                             model_time_inventory, scan_model, var_cadences)
 
 
 def _campaign_yaml(tmp_path, *, period="[2026-01-01, 2026-01-02]", option=""):
@@ -123,7 +125,9 @@ def test_quantities_keep_independent_model_times():
     hs = collocate_track(_obs_at(), _cube_for_validity(), variable="hs")
     wind = collocate_track(_obs_at(), _cube_for_validity(), variable="wind_speed")
     assert hs.sizes["obs"] == wind.sizes["obs"] == 1
-    assert hs.dt.item() == 1800 and wind.dt.item() == -1800
+    assert set(hs.data_vars) == {"hs", "model_hs"}
+    assert {"time", "lat", "lon", "model_time", "time_offset_seconds"} <= set(hs.coords)
+    assert hs.time_offset_seconds.item() == 1800 and wind.time_offset_seconds.item() == -1800
     with pytest.raises(ValueError, match="one variable per result"):
         collocate_track(_obs_at(), _cube_for_validity(), variables=["hs", "wind_speed"])
 
@@ -162,6 +166,22 @@ def test_ascat_rejects_rows_with_multiple_times(tmp_path):
         read_ascat(path)
 
 
+def test_ascat_can_retain_canonical_quality_flag(tmp_path):
+    path = tmp_path / "ascat.nc"
+    shape = (1, 2)
+    xr.Dataset(
+        {"wind_speed": (("NUMROWS", "NUMCELLS"), np.ones(shape)),
+         "wind_dir": (("NUMROWS", "NUMCELLS"), np.zeros(shape)),
+         "wvc_quality_flag": (("NUMROWS", "NUMCELLS"), np.array([[0, 1]], dtype="int16")),
+         "lat": (("NUMROWS", "NUMCELLS"), np.zeros(shape)),
+         "lon": (("NUMROWS", "NUMCELLS"), np.zeros(shape)),
+         "time": ("NUMROWS", np.array(["2026-01-01T00"], dtype="datetime64[m]"))},
+    ).to_netcdf(path)
+    out = read_ascat(path, retain_qc=True)
+    assert "x_wind_quality" in out
+    assert out.x_wind_quality.dtype == np.dtype("int16")
+
+
 def test_buoy_zero_direction_is_valid_north(tmp_path):
     path = tmp_path / "buoy.csv"
     path.write_text("time;la1WindSpd;la1WindDir\n2026-01-01 00:00:00;5;0\n")
@@ -178,6 +198,74 @@ def test_origin_ols_is_named_accurately():
 def test_scan_reports_fixed_default_tolerance():
     ds = _cube_for_validity()
     assert var_cadences(ds)["hs"][1] == np.timedelta64(30, "m")
+
+
+def test_scan_inventories_quality_meanings_and_counts():
+    ds = xr.Dataset({
+        "x_wind_quality": ("obs", np.array([3, 4, 4], dtype="int8"), {
+            "flag_values": np.array([3, 4], dtype="int8"),
+            "flag_meanings": "acceptable good",
+        })
+    })
+    inventory = {}
+    _add_quality_inventory(
+        inventory, ds, {"x_wind_quality": "owiWindQuality"})
+    entry = inventory["x_wind_quality"]
+    assert entry["meanings"]["acceptable"]["count"] == 1
+    assert entry["meanings"]["good"]["count"] == 2
+    assert entry["source"] == "owiWindQuality"
+
+    mask = xr.Dataset({
+        "x_surface_mask": ("obs", np.array([0, 1, 4, 5], dtype="int8"), {
+            "flag_values": np.array([0, 1, 4], dtype="int8"),
+            "flag_meanings": "valid land no_data",
+            "fieldmatch_flag_mode": "bitmask",
+        })
+    })
+    _add_quality_inventory(inventory, mask, {"x_surface_mask": "owiMask"})
+    surface = inventory["x_surface_mask"]
+    assert surface["meanings"]["land"]["count"] == 2
+    assert surface["meanings"]["no_data"]["count"] == 2
+    assert not surface["unrecognized"]
+
+
+def test_scan_distinguishes_forecast_metadata_from_valid_time_only(tmp_path):
+    forecast_path = tmp_path / "forecast.nc"
+    xr.Dataset(
+        {"hs": (("time", "step", "lat", "lon"), np.ones((2, 2, 2, 2)))},
+        coords={"time": np.array(["2026-01-01T00", "2026-01-01T12"], dtype="datetime64[ns]"),
+                "step": np.array([12, 24], dtype="timedelta64[h]"),
+                "lat": [0., 1.], "lon": [0., 1.]},
+    ).to_netcdf(forecast_path)
+    forecast = Dataset("forecast", "netcdf", [str(forecast_path)],
+                       {"init_cycle": "00:00", "lead": 24})
+    report = scan_model(forecast)
+    assert report["time_kind"] == "forecast"
+    assert report["raw_cycles"] == ["00:00", "12:00"]
+    assert report["raw_lead_count"] == 2
+    assert report["selection"] == {"init_cycle": "00:00", "lead": 24}
+
+    valid_path = tmp_path / "valid.nc"
+    xr.Dataset(
+        {"hs": (("time", "lat", "lon"), np.ones((2, 2, 2)))},
+        coords={"time": np.array(["2026-01-01T00", "2026-01-01T06"], dtype="datetime64[ns]"),
+                "lat": [0., 1.], "lon": [0., 1.]},
+    ).to_netcdf(valid_path)
+    valid = Dataset("analysis", "netcdf", [str(valid_path)])
+    valid_report = scan_model(valid)
+    assert model_time_inventory(valid)["time_kind"] == "valid_time_only"
+
+    camp = SimpleNamespace(name="test", bbox=dict(lonmin=0, lonmax=1, latmin=0, latmax=1),
+                           period=(np.datetime64("2026-01-01"), np.datetime64("2026-01-02")))
+    text = format_report(camp, {"forecast": report, "analysis": valid_report})
+    assert "forecast (initialization + lead)" in text
+    assert "cycles   : 00:00, 12:00 UTC" in text
+    assert "selection: init_cycle=00:00, lead=24" in text
+    assert "valid-time only" in text
+    assert "selection: not applicable (no initialization/lead metadata)" in text
+
+    with pytest.raises(ValueError, match="valid times only"):
+        open_model(valid_path, engine="netcdf4", init_cycle="00:00", lead=24)
 
 
 def test_manifest_rejects_changed_inputs(tmp_path):
@@ -228,7 +316,7 @@ def test_campaign_cli_success_then_failed_run_blocks_old_output(tmp_path):
     result = runner.invoke(app, ["collocate", str(config), "obs", "model", "--variable", "hs",
                                  "--format", "netcdf"])
     assert result.exit_code == 0, result.output
-    nc = tmp_path / "fieldmatch_out" / "test_obs_x_model_hs.nc"
+    nc = tmp_path / "fieldmatch_out" / "obs__model__hs.nc"
     original = nc.read_bytes()
     assert runner.invoke(app, ["stats", str(nc)]).exit_code == 0
     assert not list(nc.parent.glob("*_scatter.png"))
@@ -265,7 +353,7 @@ def test_campaign_cli_defaults_to_csv_and_stats_accepts_it(tmp_path):
     runner = CliRunner()
     result = runner.invoke(app, ["collocate", str(config), "obs", "model", "--variable", "hs"])
     assert result.exit_code == 0, result.output
-    pairs = tmp_path / "fieldmatch_out" / "test_obs_x_model_hs.csv"
+    pairs = tmp_path / "fieldmatch_out" / "obs__model__hs.csv"
     assert pairs.exists() and not pairs.with_suffix(".nc").exists()
     report = tmp_path / "stats.csv"
     result = runner.invoke(app, ["stats", str(pairs), "--output", str(report)])

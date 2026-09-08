@@ -30,7 +30,9 @@ def test_installed_template_covers_reader_and_model_options(tmp_path):
         for key in spec.options - {'lat', 'lon'}:
             expected = params[key].default
             actual = covered[kind].options[key]
-            assert actual == expected or (key == 'extra_vars' and actual == [] and expected is None)
+            assert (actual == expected
+                    or (isinstance(expected, tuple) and actual == list(expected))
+                    or (key == 'extra_vars' and actual == [] and expected is None))
     for kind in ['grib', 'netcdf']:
         assert set(covered[kind].options) == MODEL_OPTIONS
     assert set(raw['matching_defaults']) == set(MATCHING_DEFAULTS)

@@ -6,8 +6,23 @@ plotting functions use prepared results without doing their own matching.
 
 ## Install
 
-Use Python 3.10 or newer. From the supplied source folder, in an existing Python
-environment:
+Use Python 3.10 or newer. The simplest route for someone who already has conda
+and wants to use its base environment is one command from the repository:
+
+```bash
+bash install.sh --base
+```
+
+No conda activation is required. The installer adds FieldMatch and its plotting
+dependencies to base and verifies GRIB and NetCDF support. To update a GitHub
+checkout later:
+
+```bash
+git pull --ff-only
+bash install.sh --base
+```
+
+In any other already-active Python environment, use:
 
 ```bash
 python -m pip install '.[plot]'
@@ -26,41 +41,49 @@ fieldmatch doctor
 See [installation](docs/installation.md) for pip/venv, wheels, GRIB troubleshooting,
 and optional VS Code cells. No JupyterLab setup is required.
 
-## Run a study
+## Run a study from Python
 
-Copy `examples/analyze.py` and `examples/harry.yaml` into your study folder.
-Edit the YAML's data root and dataset declarations, then run the installed commands:
+Use YAML as a catalogue for paths, readers, coordinate/variable names and provider
+quality fields. Put the scientific experiment in one ordinary Python script:
+
+```python
+import fieldmatch as fm
+
+study = fm.Study("harry.yaml")
+buoy = study.open_observations("buoy_ba04")
+forecast = study.open_model(
+    "forecast", variables=["hs"], init_cycle="00:00", lead="12-35"
+)
+
+# Spatial extraction retains every native model time; it does not match time.
+station = fm.extract_station(
+    forecast, observations=buoy, variables=["hs"], space_method="bilinear"
+)
+
+# Time matching is a separate, explicit operation used for statistics.
+pairs = fm.match_times(
+    buoy, station, variable="hs", tolerance="30min", time_tie="earlier"
+)
+```
+
+Plot `buoy.time/buoy.hs` and `station.time/station.hs` directly with Matplotlib.
+They retain their independent native sampling. Use `common_sample` only when a
+fair statistical ranking requires several models to share observations.
+
+The same script can be run with `python analysis.py` or split into `# %%` cells.
+Nothing detects the execution environment or requires JupyterLab. Saving prepared
+NetCDF results is optional.
+
+The command line remains useful for installation and data inspection:
 
 ```bash
+fieldmatch doctor
 fieldmatch scan /path/to/study/harry.yaml
-fieldmatch run /path/to/study/harry.yaml --describe
-fieldmatch run /path/to/study/harry.yaml
+fieldmatch vars /path/to/study/harry.yaml forecast
 ```
 
-`scan` inventories files and coverage. `run --describe` prints resolved scientific
-choices without computing. `run` executes all declared comparisons and variables,
-saving NetCDF, CSV and manifests. Use `fieldmatch compare` for one named comparison.
-
-Set `CONFIG` in `analyze.py` to your YAML's absolute path, then run:
-
-```bash
-python /path/to/study/analyze.py
-```
-
-The script only reads saved results, calculates summaries and plots them.
-Set `SHOW = True` to display figures and `SAVE = True` to save figures, tables,
-provenance and an HTML gallery. Either can be disabled independently. For a headless
-terminal use `SHOW = False, SAVE = True` (as two separate Python assignments).
-Display uses your Matplotlib backend; no interactive-window detection is performed.
-
-The same `CONFIG` works in the terminal and VS Code cells. Relative YAML data/output
-paths resolve from the YAML. CLI paths use ordinary shell rules; absolute paths
-work from anywhere. No script arguments or working-directory guessing are involved.
-
-In VS Code, select your installed Python environment and run the two cells in order:
-settings/functions, then load/plot. `tables`, `pairs`, `grids` and `analysis` remain
-available for exploration. No JupyterLab server is required. Comparisons are always
-run separately from the terminal.
+Named YAML comparisons and the `run`/`compare` commands remain available for
+reproducible batch production, but are not required by the Python-first workflow.
 
 See the [complete analysis guide](docs/analysis-guide.md).
 
@@ -81,7 +104,6 @@ comparisons:
   analysis_era5:
     reference: analysis
     model: era5
-    time_basis: valid_time
     variables:
       hs: {}
 ```
@@ -91,8 +113,8 @@ experiment, not a physical requirement. Model source names are mapped once in th
 dataset's `rename` block. Incompatible period/wind definitions are not aliases.
 
 Observation matching uses nearest time within a declared tolerance. Grid matching
-uses exact common times on the declared reference grid; difference = model minus
-reference. Both use explicit spatial rules, no extrapolation or automatic coastal
+uses exact common valid times from the selected dataset views on the declared
+reference grid; difference = model minus reference. Both use explicit spatial rules, no extrapolation or automatic coastal
 filling, and circular/vector treatment where appropriate. Common-observation
 selection is a separate, explicit analysis step.
 
@@ -125,9 +147,9 @@ configuration to maintain.
 - [Troubleshooting](docs/troubleshooting.md), [examples](examples/README.md).
 - [Contributing](CONTRIBUTING.md), [testing](docs/testing.md), [history](HISTORY.md).
 
-Version 0.4 changes the example workflow and installation guidance. Numerical
-comparison settings and the 0.3 YAML schema remain compatible. The source archive
-includes scripts and documentation; the wheel installs the package itself.
+Version 0.5 provides the Python-first study API and compact forecast provenance.
+The source archive includes scripts and documentation; the wheel installs the
+package itself.
 
 Use `fieldmatch config-example --output config_reference.yaml` for all editable keys,
 and `fieldmatch info RESULT` to read provenance without opening internal JSON.

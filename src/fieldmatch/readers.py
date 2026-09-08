@@ -62,6 +62,51 @@ def _flag_values_named(flag, *names):
     return [int(v) for v, m in zip(values, meanings) if m in names]
 
 
+def _select_flag_meanings(flag, requested, option):
+    """Translate explicit CF flag meanings to their product-specific values."""
+    if isinstance(requested, str):
+        requested = [requested]
+    elif isinstance(requested, (list, tuple)):
+        requested = list(dict.fromkeys(requested))
+    else:
+        requested = []
+    if not requested or not all(isinstance(value, str) for value in requested):
+        raise ValueError(f"{option} must be a nonempty string or string list")
+    meanings = str(flag.attrs.get("flag_meanings", "")).split()
+    values = np.atleast_1d(flag.attrs.get("flag_values", []))
+    available = dict(zip(meanings, values))
+    unknown = sorted(set(requested) - set(available))
+    selected = [name for name in requested if name in available]
+    if not selected:
+        raise ValueError(
+            f"{option} contains no available meanings; requested {requested}, "
+            f"available {sorted(available)}")
+    if unknown:
+        warnings.warn(
+            f"{option}: {unknown} not defined by this product; using {selected}. "
+            f"Available meanings are {sorted(available)}.")
+    return [int(available[name]) for name in selected], selected
+
+
+def _selected_mask_bits(flag, selected_values):
+    """True where a bit mask contains no meaning outside the accepted set.
+
+    OWI mask value zero means ``valid``; nonzero values can be combined (for
+    example 5 is land + no_data), so equality tests lose valid combinations.
+    """
+    raw = np.asarray(flag.values)
+    if not np.issubdtype(raw.dtype, np.integer):
+        raise ValueError(f"{flag.name} bit mask must have an integer dtype")
+    selected_values = [int(value) for value in selected_values]
+    allowed_bits = 0
+    for value in selected_values:
+        allowed_bits |= value
+    keep = (raw & ~allowed_bits) == 0
+    if 0 not in selected_values:
+        keep &= raw != 0
+    return keep
+
+
 def _open_sea_mask(src, dist_var, surf_var, min_dist_km, open_ocean_only,
                    open_names=("open_ocean", "ocean_or_semi_enclosed_sea")):
     """True where the retrieval is over open sea and far enough from land.
@@ -125,7 +170,10 @@ def _open_sea_cloud(src, time, lat, lon, data_vars, dist_var, surf_var,
 
 #: Attributes that are COUNTS: summed when clouds from several files are
 #: combined, rather than inherited from whichever file happened to be first.
-COUNT_ATTRS = ("n_rejected_coastal", "n_rejected_qual", "n_read")
+COUNT_ATTRS = (
+    "n_rejected_coastal", "n_rejected_qual", "n_rejected_surface",
+    "n_rejected_qc_union", "n_read",
+)
 
 #: Prefix for pass-through columns requested via `extra_vars`. Keeps them in a
 #: namespace of their own so a raw variable can never collide with a standard
@@ -210,6 +258,29 @@ def _collect_extras(src, extra_vars, dim, out, prov, group_label=""):
     return out, prov
 
 
+def _retain_qc(src, out, mapping, enabled, prov):
+    """Retain a small, canonical QC vocabulary under the ``x_`` namespace.
+
+    Raw provider names remain available through ``extra_vars``. These aliases
+    cover the flags most useful for reproducible sample sensitivity without
+    pretending that different missions share one universal quality scale.
+    """
+    if not enabled:
+        return out, prov
+    kept = []
+    for canonical, source in mapping.items():
+        if source not in src:
+            continue
+        name = f"{EXTRA_PREFIX}{canonical}"
+        out[name] = src[source].load().copy(deep=True)
+        kept.append(f"{name}={source}")
+    previous = [] if prov.get("retained_qc") in (None, "none available") else \
+        str(prov["retained_qc"]).split(", ")
+    combined = previous + kept
+    prov["retained_qc"] = ", ".join(combined) if combined else "none available"
+    return out, prov
+
+
 def _subset_raw(value, idx):
     if isinstance(value, xr.DataArray):
         return np.asarray(value.values)[idx], dict(value.attrs)
@@ -259,21 +330,24 @@ def _qc_by_flag(src, values, var_flag_pairs):
     absent from the product is recorded as unfiltered -- that is a real and
     consequential fact (S3 wind has no flag), not a detail to omit.
     """
-    prov, rejected = {}, 0
+    prov, rejected = {}, None
     for var, flag in var_flag_pairs:
         if flag in src:
             bad = src[flag].values != 0
-            rejected += int(np.count_nonzero(bad & np.isfinite(values[var])))
+            finite = np.isfinite(values[var])
+            prov[f"n_flagged_{var}_quality"] = int(np.count_nonzero(bad))
+            prov[f"n_newly_masked_{var}_quality"] = int(np.count_nonzero(bad & finite))
+            rejected = bad.copy() if rejected is None else (rejected | bad)
             values[var] = (values[var].where(~bad) if isinstance(values[var], xr.DataArray)
                            else np.where(bad, np.nan, values[var]))
             prov[f"{var}_filter"] = f"{flag} == 0"
         else:
             prov[f"{var}_filter"] = f"none ({flag} not present in this product)"
-    return values, prov, rejected
+    return values, prov, int(np.count_nonzero(rejected)) if rejected is not None else 0
 
 
 # ── altimeters ─────────────────────────────────────────────────────────────
-def read_altimeter_cmems(file, extra_vars=None):
+def read_altimeter_cmems(file, extra_vars=None, retain_qc=False):
     """CMEMS L3 near-real-time altimetry (global_vavh_l3_rt_*): already a flat
     along-track cloud. VAVH -> hs (filtered), WIND_SPEED -> wind_speed.
 
@@ -288,6 +362,8 @@ def read_altimeter_cmems(file, extra_vars=None):
                "hs_unfiltered": src["VAVH_UNFILTERED"],
                "wind_speed": src["WIND_SPEED"]}
         out, extra_prov = _collect_extras(src, extra_vars, "time", out, {})
+        out, extra_prov = _retain_qc(
+            src, out, {"hs_unfiltered": "VAVH_UNFILTERED"}, retain_qc, extra_prov)
         return _cloud(
             src["time"].values, src["latitude"].values, src["longitude"].values,
             out,
@@ -314,7 +390,8 @@ S3_RETRACKERS = {"sar": "_01_ku", "plrm": "_01_plrm_ku"}
 
 
 def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
-                      open_ocean_only=True, extra_vars=None, retracker="sar"):
+                      open_ocean_only=True, extra_vars=None, retracker="sar",
+                      retain_qc=False):
     """Sentinel-3 SRAL L2 WAT (RED/STD/ENH): 1 Hz (`_01`) Ku-band ocean
     retracker. `retracker='plrm'` selects the pseudo-LRM retrieval instead.
     Quality flags applied when present (0 = good); coastal and non-open-sea
@@ -341,6 +418,15 @@ def read_altimeter_s3(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
                 "time_source": "time_01",
                 "rate": "1 Hz (_01)", "n_rejected_qual": n_qual,
                 "n_read": int(src.sizes["time_01"]), **qc_prov}
+        out, prov = _retain_qc(src, out, {
+            "hs_quality": f"swh_ocean_qual{sfx}",
+            "wind_quality": f"wind_speed_alt_qual{sfx}",
+            "sig0_quality": f"sig0_ocean_qual{sfx}",
+            "distance_to_coast_m": "dist_coast_01",
+            "surface_type": "surf_type_01",
+            "rain_flag": f"rain_flag{sfx}",
+            "sea_ice_flag": f"open_sea_ice_flag{sfx}",
+        }, retain_qc, prov)
         out, prov = _collect_extras(src, extra_vars, "time_01", out, prov)
         return _open_sea_cloud(
             src, src["time_01"].values, src["lat_01"].values,
@@ -358,7 +444,7 @@ S6_BANDS = {"ku": "data_01/ku", "c": "data_01/c"}
 
 def read_altimeter_s6(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
                       open_ocean_only=True, extra_vars=None,
-                      retracker="mle", band="ku"):
+                      retracker="mle", band="ku", retain_qc=False):
     """Sentinel-6 P4 L2 LR (RED/STD): netCDF groups. 1 Hz `data_01` for
     position/time/wind, `data_01/<band>` for swh/sig0. `retracker='nr'`
     selects the numerical ocean retracker (Ku only). Quality: *_qual == 0;
@@ -385,6 +471,16 @@ def read_altimeter_s6(file, min_dist_coast_km=DEFAULT_MIN_DIST_COAST_KM,
                 "time_source": "time",
                 "rate": "1 Hz (data_01)", "n_rejected_qual": n_qual,
                 "n_read": int(g1.sizes["time"]), **qc_prov}
+        out, prov = _retain_qc(gku, out, {
+            "hs_quality": f"swh_ocean{sfx}_qual",
+            "sig0_quality": f"sig0_ocean{sfx}_qual",
+        }, retain_qc, prov)
+        out, prov = _retain_qc(g1, out, {
+            "distance_to_coast_m": "distance_to_coast",
+            "surface_type": "surface_classification_flag",
+            "rain_flag": "rain_flag_nr" if sfx else "rain_flag",
+            "sea_ice_flag": "rad_sea_ice_flag",
+        }, retain_qc, prov)
         # Ku and C share variable names, so extras may be qualified 'ku:name'
         # / 'c:name' exactly as `fieldmatch vars` displays them.
         out, prov = _collect_extras(g1, _unqualified(extra_vars, None), "time",
@@ -434,18 +530,23 @@ def s1_good_quality_values(qflag):
 _s1_good_values = s1_good_quality_values
 
 
-def read_sentinel1(file, qc=True, extra_vars=None):
+def read_sentinel1(file, wind_quality=("acceptable", "good"),
+                   surface_mask=("valid",), extra_vars=None, retain_qc=False):
     """Sentinel-1 IW OCN merged product (owi wind grid): flatten the 2-D swath
     into an obs cloud stamped with the scene time (attrs firstMeasurementTime).
-    QC keeps quality in {good, acceptable} (IPF-aware) and owiMask == valid."""
+    Accepted quality and surface meanings are explicit dataset options."""
     with xr.open_dataset(file) as src:
         speed = src["owiWindSpeed"].values.astype("f8")
         wdir = src["owiWindDirection"].values.astype("f8")
-        if qc:
-            keep = np.isin(src["owiWindQuality"].values, _s1_good_values(src["owiWindQuality"]))
-            keep &= src["owiMask"].values == 0
-            speed = np.where(keep, speed, np.nan)
-            wdir = np.where(keep, wdir, np.nan)
+        quality_values, quality_names = _select_flag_meanings(
+            src["owiWindQuality"], wind_quality, "wind_quality")
+        surface_values, surface_names = _select_flag_meanings(
+            src["owiMask"], surface_mask, "surface_mask")
+        quality_ok = np.isin(src["owiWindQuality"].values, quality_values)
+        surface_ok = _selected_mask_bits(src["owiMask"], surface_values)
+        keep = quality_ok & surface_ok
+        speed = np.where(keep, speed, np.nan)
+        wdir = np.where(keep, wdir, np.nan)
         n = speed.size
         t = np.full(n, np.datetime64(src.attrs["firstMeasurementTime"].rstrip("Z")))
         out = {"wind_speed": (speed, dict(src["owiWindSpeed"].attrs)),
@@ -454,29 +555,37 @@ def read_sentinel1(file, qc=True, extra_vars=None):
                                ("owiEcmwfWindDirection", "ecmwf_wind_dir")):
             if src_name in src:
                 out[name] = src[src_name].values.astype("f8")
-        good = s1_good_quality_values(src["owiWindQuality"]) if qc else None
         prov = {
             "reader": "sentinel1",
             "wind_speed_source": "owiWindSpeed", "wind_dir_source": "owiWindDirection",
             "lat_source": "owiLat", "lon_source": "owiLon",
             "time_source": "(global attribute firstMeasurementTime)",
-            "wind_speed_filter": (f"owiWindQuality in {good} and owiMask == 0 "
-                                  f"(IPF {src.attrs.get('IPFversion', '?')})"
-                                  if qc else "none (qc=False)"),
-            "land_mask": "owiMask == 0 (excludes land/ice/no_data/RFI)" if qc else "none",
-            "n_rejected_qual": int(np.count_nonzero(np.isnan(speed))) if qc else 0,
+            "wind_speed_filter": (f"owiWindQuality in {quality_values} "
+                                  f"({', '.join(quality_names)}); IPF "
+                                  f"{src.attrs.get('IPFversion', '?')}"),
+            "land_mask": (f"owiMask contains only selected bits {surface_values} "
+                          f"({', '.join(surface_names)})"),
+            "n_rejected_qual": int(np.count_nonzero(~quality_ok)),
+            "n_rejected_surface": int(np.count_nonzero(~surface_ok)),
+            "n_rejected_qc_union": int(np.count_nonzero(~(quality_ok & surface_ok))),
             "n_rejected_coastal": 0, "n_read": int(speed.size),
             "note_ecmwf_columns": ("owiEcmwf* is the ECMWF first guess used INSIDE "
                                    "the CMOD inversion -- SAR wind is not independent "
                                    "of ECMWF"),
         }
+        src["owiMask"].attrs["fieldmatch_flag_mode"] = "bitmask"
+        out, prov = _retain_qc(src, out, {
+            "wind_quality": "owiWindQuality",
+            "surface_mask": "owiMask",
+            "inversion_quality": "owiInversionQuality",
+        }, retain_qc, prov)
         out, prov = _collect_extras(src, extra_vars,
                                     ("owiAzSize", "owiRaSize"), out, prov)
         return _cloud(t, src["owiLat"].values, src["owiLon"].values, out,
                       provenance=prov)
 
 
-def read_ascat(file, extra_vars=None):
+def read_ascat(file, extra_vars=None, retain_qc=False):
     """ASCAT L2 wind (NUMROWS x NUMCELLS): flatten to a cloud, one time per
     row. QC: wvc_quality_flag < 65536 (same rule as the legacy pipeline)."""
     with xr.open_dataset(file) as src:
@@ -512,6 +621,8 @@ def read_ascat(file, extra_vars=None):
             "n_rejected_qual": int(np.count_nonzero(~good)),
             "n_rejected_coastal": 0, "n_read": int(good.size),
         }
+        out, prov = _retain_qc(src, out, {"wind_quality": "wvc_quality_flag"},
+                               retain_qc, prov)
         out, prov = _collect_extras(src, extra_vars,
                                     ("NUMROWS", "NUMCELLS"), out, prov)
         return _cloud(t2d, src["lat"].values, src["lon"].values,
@@ -580,21 +691,22 @@ def read_buoy_ispra(file, lat=None, lon=None):
 
 READERS = {
     "altimeter_cmems": ReaderSpec(
-        read_altimeter_cmems, frozenset({"extra_vars"}), dim="time"),
+        read_altimeter_cmems, frozenset({"extra_vars", "retain_qc"}), dim="time"),
     "altimeter_s3": ReaderSpec(
         read_altimeter_s3,
-        frozenset({"min_dist_coast_km", "open_ocean_only", "extra_vars", "retracker"}),
+        frozenset({"min_dist_coast_km", "open_ocean_only", "extra_vars", "retracker", "retain_qc"}),
         dim="time_01"),
     "altimeter_s6": ReaderSpec(
         read_altimeter_s6,
         frozenset({"min_dist_coast_km", "open_ocean_only", "extra_vars",
-                   "retracker", "band"}),
+                   "retracker", "band", "retain_qc"}),
         group="data_01", dim="time", extra_groups=("data_01/ku", "data_01/c")),
     "sentinel1": ReaderSpec(
-        read_sentinel1, frozenset({"qc", "extra_vars"}),
+        read_sentinel1,
+        frozenset({"wind_quality", "surface_mask", "extra_vars", "retain_qc"}),
         dim=("owiAzSize", "owiRaSize")),
     "ascat": ReaderSpec(
-        read_ascat, frozenset({"extra_vars"}), dim=("NUMROWS", "NUMCELLS")),
+        read_ascat, frozenset({"extra_vars", "retain_qc"}), dim=("NUMROWS", "NUMCELLS")),
     "buoy_ispra": ReaderSpec(
         read_buoy_ispra, frozenset({"lat", "lon"}), dim=None),
 }

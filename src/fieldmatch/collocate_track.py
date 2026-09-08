@@ -129,12 +129,18 @@ def collocate_track(obs, model, variables=None, tol=None, *, variable=None,
         result = result.drop_vars(oname)
     result[f"model_{variable}"] = ("obs", out[keep])
     result[f"model_{variable}"].attrs = dict(observed.attrs)
-    result["model_time"] = ("obs", times[step])
-    result["dt"] = ("obs", (ot[keep]-times[step])/np.timedelta64(1,"s"))
-    result.dt.attrs["long_name"] = "observation time minus model valid time, seconds"
-    for name in ("init", "lead_hours"):
-        if name in model.coords:
-            result[name] = ("obs", model[name].values[step])
+    identities = [name for name in ("obs_id", "source_file", "record_index") if name in result]
+    if identities:
+        result = result.set_coords(identities)
+    result = result.assign_coords(
+        model_time=("obs", times[step]),
+        time_offset_seconds=("obs", (ot[keep]-times[step])/np.timedelta64(1,"s")))
+    result.time_offset_seconds.attrs["long_name"] = \
+        "observation time minus model valid time, seconds"
+    if model.attrs.get("fieldmatch_time_kind") != "valid_time_only":
+        for name in ("init", "lead_hours"):
+            if name in model.coords:
+                result = result.assign_coords({name: ("obs", model[name].values[step])})
     result.attrs.update(
         quantity=definition(variable), variable=variable, obs_variable=oname,
         model_sources=", ".join(sources), time_method="nearest", time_tie=time_tie,

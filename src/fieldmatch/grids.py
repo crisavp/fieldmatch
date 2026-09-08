@@ -8,10 +8,8 @@ import numpy as np
 import xarray as xr
 from .quantities import validate, definition, unit_name, DIRECTION_VARS
 from .collocate_track import source_fields
+from .forecast import forecast_view
 from .spatial import sample_quantity
-
-TIME_BASES = {'valid_time', 'same_init', 'same_lead'}
-
 
 def _fields(ds, variable):
     for axis in ('time', 'lat', 'lon'):
@@ -36,43 +34,51 @@ def _fields(ds, variable):
     return fields
 
 
-def compare_grids(reference, candidate, variable, *, space_method, time_basis,
+def compare_grids(reference, candidate, variable, *, space_method,
                   reference_name='reference', candidate_name='candidate',
+                  forecast_pairing=None,
                   direction_resultant_min=1e-10, wind_direction_min_speed=1e-10):
     """Return masked reference/candidate fields, candidate-minus-reference and counts.
 
-    ``time_basis`` is required: valid_time permits different initializations;
-    same_init/same_lead additionally require equal finite forecast coordinates.
-    These restrictions filter exact common valid times, never move them.
+    Dataset selectors define each forecast view. Comparison joins those views at
+    exact common valid times. When both inputs are forecasts the caller must say
+    whether initialization and lead must also agree (``same_forecast``) or only
+    the verifying timestamp must agree (``same_valid_time``).
     Finite masks are independent at each time. Source metadata are kept in JSON.
     """
-    if space_method not in {'bilinear', 'nearest'} or time_basis not in TIME_BASES:
-        raise ValueError('select space_method bilinear/nearest and time_basis valid_time/same_init/same_lead')
+    if space_method not in {'bilinear', 'nearest'}:
+        raise ValueError('select space_method bilinear or nearest')
     for v in (direction_resultant_min, wind_direction_min_speed):
         if not np.isfinite(v) or v < 0:
             raise ValueError('direction thresholds must be finite and nonnegative')
     if direction_resultant_min > 1:
         raise ValueError('direction_resultant_min cannot exceed 1')
     rf, cf = _fields(reference, variable), _fields(candidate, variable)
+    reference_view, candidate_view = forecast_view(reference), forecast_view(candidate)
+    both_forecasts = (reference_view['time_kind'] == 'forecast'
+                      and candidate_view['time_kind'] == 'forecast')
+    if both_forecasts:
+        if forecast_pairing not in {'same_forecast', 'same_valid_time'}:
+            raise ValueError("two forecasts require forecast_pairing='same_forecast' "
+                             "or 'same_valid_time'")
+    elif forecast_pairing is not None:
+        raise ValueError('forecast_pairing applies only when both grids are forecasts')
     # Unknown quantities still require explicit, compatible units on both sides.
     def units(fields):
         return ('degrees' if variable == 'wind_dir' else 'm s-1') if set(fields) == {'u10','v10'} else unit_name(next(iter(fields.values())).attrs.get('units'))
     if not units(rf) or units(rf) != units(cf):
         raise ValueError('reference and candidate require compatible declared units')
     times = np.intersect1d(reference.time.values, candidate.time.values)
-    n_common_times = len(times)
-    if time_basis != 'valid_time':
-        coordinate = 'init' if time_basis == 'same_init' else 'lead_hours'
-        values = []
-        for ds in (reference, candidate):
-            if coordinate not in ds.coords or ds[coordinate].dims != ('time',):
-                raise ValueError(f'{time_basis} requires a {coordinate} coordinate on time')
-            values.append(ds[coordinate].sel(time=times).values)
-        a, b = values
-        finite = (~np.isnat(a) & ~np.isnat(b)) if coordinate == 'init' else (np.isfinite(a) & np.isfinite(b))
-        times = times[finite & (a == b)]
     if not len(times):
-        raise ValueError('no exact common valid times satisfy the selected time basis')
+        raise ValueError('no exact common valid times')
+    if both_forecasts and forecast_pairing == 'same_forecast':
+        r_init = reference.init.sel(time=times).values.astype('datetime64[ns]')
+        c_init = candidate.init.sel(time=times).values.astype('datetime64[ns]')
+        r_lead = np.asarray(reference.lead_hours.sel(time=times), dtype=float)
+        c_lead = np.asarray(candidate.lead_hours.sel(time=times), dtype=float)
+        if not np.array_equal(r_init, c_init) or not np.array_equal(r_lead, c_lead):
+            raise ValueError("forecast_pairing='same_forecast' requires equal "
+                             "initialization and lead at every common valid time")
     y, x = np.meshgrid(reference.lat.values, reference.lon.values, indexing='ij')
     points = np.column_stack([y.ravel(), x.ravel()])
     shape = (len(times), *y.shape)
@@ -97,30 +103,29 @@ def compare_grids(reference, candidate, variable, *, space_method, time_basis,
     if circular:
         attrs['direction_convention'] = 'from_north_clockwise'
     ds = xr.Dataset(coords={'time':times, 'lat':reference.lat.values, 'lon':reference.lon.values})
-    for name, value in [('reference',a),('candidate',b),('difference',difference)]:
-        ds[name] = (('time','lat','lon'), np.where(valid,value,np.nan), dict(attrs))
+    # Preserve each sampled field's independent availability. Difference and
+    # all comparison statistics use the common finite mask.
+    for name, value in [('reference',a),('candidate',b)]:
+        ds[name] = (('time','lat','lon'), value, dict(attrs))
+    ds['difference'] = (('time','lat','lon'), np.where(valid,difference,np.nan), dict(attrs))
     ds.difference.attrs.pop('direction_convention', None)
     ds.difference.attrs['long_name'] = f'{candidate_name} minus {reference_name}'
-    ds['valid'] = (('time','lat','lon'),valid.astype('uint8'), {'long_name':'common finite mask; 1 accepted, 0 missing'})
-    for name,mask in [('reference',np.isfinite(a)),('candidate',np.isfinite(b)),('common',valid)]:
-        ds[f'n_{name}'] = ('time',mask.sum(axis=(1,2)))
     provenance = {}
+    selected_views = {}
     for label, source, fields in [('reference',reference,rf),('candidate',candidate,cf)]:
         provenance[label] = {s:dict(f.attrs) for s,f in fields.items()}
-        for key in ('init','lead_hours'):
-            if key in source.coords:
-                if source[key].dims != ('time',):
-                    raise ValueError(f'{key} must be normalized on time before comparing')
-                ds[f'{label}_{key}'] = ('time',source[key].sel(time=times).values)
+        selected_views[label] = forecast_view(source.sel(time=times))
     ds.attrs.update(comparison_kind='grid', variable=variable, quantity=definition(variable),
         reference_name=reference_name, candidate_name=candidate_name,
         target_grid=reference_name, difference_sign='candidate minus reference',
-        time_method='exact', time_basis=time_basis, space_method=space_method,
+        time_method='exact', space_method=space_method,
+        forecast_pairing=(forecast_pairing if both_forecasts else 'not_applicable'),
         mask_policy='common_finite_per_time', extrapolation='none',
         missing_corners='reject_nonzero_weight', direction_resultant_min=float(direction_resultant_min),
         wind_direction_min_speed=float(wind_direction_min_speed),
         n_reference_times=reference.sizes['time'], n_candidate_times=candidate.sizes['time'],
-        n_common_times_before_basis=n_common_times, n_selected_times=len(times),
+        n_common_times=len(times), n_selected_times=len(times),
+        forecast_views=json.dumps(selected_views,sort_keys=True),
         source_attributes=json.dumps(provenance,default=str,sort_keys=True))
     return ds
 
@@ -141,15 +146,37 @@ def grid_stats(ds):
     lon = np.deg2rad(edges(ds.lon.values))
     weights = xr.DataArray(np.diff(np.sin(lat))[:,None]*np.diff(lon)[None,:],
                            dims=('lat','lon'),coords={'lat':ds.lat,'lon':ds.lon})
-    valid_weights = weights.where(ds.valid == 1)
+    valid = np.isfinite(ds.reference) & np.isfinite(ds.candidate)
+    valid_weights = weights.where(valid)
     total = valid_weights.sum(('lat','lon'))
     out = xr.Dataset({
         'mean_difference':(ds.difference*valid_weights).sum(('lat','lon'))/total,
         'rms_difference':np.sqrt((ds.difference**2*valid_weights).sum(('lat','lon'))/total),
-        'valid_area_fraction':total/weights.sum(), 'n_common':ds.n_common})
+        'valid_area_fraction':total/weights.sum(),
+        'n_common':valid.sum(('lat','lon')).astype('int64')})
+    # Arithmetic on a DataArray carries all auxiliary coordinates. They belong
+    # in the detailed grid result, not in this deliberately compact table.
+    auxiliary = [name for name in out.coords if name != 'time']
+    if auxiliary:
+        out = out.drop_vars(auxiliary)
     for key in ('mean_difference','rms_difference'):
         out[key].attrs['units'] = ds.difference.attrs['units']
-    for key in ('reference_init','candidate_init','reference_lead_hours','candidate_lead_hours'):
-        if key in ds: out[key] = ds[key]
     out.attrs.update(ds.attrs, spatial_weighting='spherical midpoint cells')
+    return out
+
+
+def grid_point_stats(ds):
+    """Bias, RMS difference and common count at each saved grid point."""
+    if ds.attrs.get('comparison_kind') != 'grid':
+        raise ValueError('grid_point_stats requires compare_grids output')
+    valid = np.isfinite(ds.reference) & np.isfinite(ds.candidate)
+    difference = ds.difference.where(valid)
+    out = xr.Dataset({
+        'mean_difference': difference.mean('time', skipna=True),
+        'rms_difference': np.sqrt((difference ** 2).mean('time', skipna=True)),
+        'n_common': valid.sum('time').astype('int64'),
+    })
+    for name in ('mean_difference', 'rms_difference'):
+        out[name].attrs['units'] = ds.difference.attrs['units']
+    out.attrs.update(ds.attrs, statistics_dimension='time')
     return out

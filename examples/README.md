@@ -45,7 +45,7 @@ python examples/create_demo_data.py
 fieldmatch scan examples/minimal_campaign.yaml
 fieldmatch vars examples/minimal_campaign.yaml altimeter
 fieldmatch collocate examples/minimal_campaign.yaml altimeter model --variable hs --format both
-fieldmatch stats examples/results/demo_altimeter_x_model_hs.nc
+fieldmatch stats examples/results/altimeter__model__hs.nc
 ```
 
 The generated examples/data and examples/results directories are ignored by Git.
@@ -59,7 +59,7 @@ provenance management to your script; named comparisons are the usual starting p
 
 ## Other templates
 
-`forecast_campaign.yaml` illustrates fixed initialization/lead selection.
+`forecast_campaign.yaml` illustrates recurring initialization-cycle and lead selection.
 `extra_variables_campaign.yaml` illustrates reader choices and extra source fields.
 These templates contain placeholder paths and require your own datasets.
 `config/campaigns/harry.yaml` is a larger inventory template; `examples/harry.yaml`

@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from fieldmatch.readers import EXTRA_PREFIX, _collect_extras, _unqualified
+from fieldmatch.readers import EXTRA_PREFIX, _collect_extras, _retain_qc, _unqualified
 
 
 def _src():
@@ -72,6 +72,22 @@ def test_group_qualified_names_do_not_collide():
 def test_no_extra_vars_is_a_no_op():
     out, prov = _collect_extras(_src(), None, "time_01", {"hs": np.zeros(3)}, {})
     assert list(out) == ["hs"] and prov == {}
+
+
+def test_retain_qc_uses_canonical_names_and_preserves_flag_metadata():
+    src = xr.Dataset({"provider_flag": ("time_01", np.array([0, 1], dtype="int8"),
+                                        {"flag_values": [0, 1],
+                                         "flag_meanings": "good bad"})})
+    out, prov = _retain_qc(src, {}, {"hs_quality": "provider_flag"}, True, {})
+    assert list(out) == ["x_hs_quality"]
+    assert out["x_hs_quality"].dtype == np.dtype("int8")
+    assert out["x_hs_quality"].attrs["flag_meanings"] == "good bad"
+    assert prov["retained_qc"] == "x_hs_quality=provider_flag"
+
+
+def test_retain_qc_is_opt_in():
+    out, prov = _retain_qc(_src(), {}, {"rain_flag": "rain_flag_01_ku"}, False, {})
+    assert out == {} and prov == {}
 
 
 # ── enumerated overrides (retracker / band) ─────────────────────────────────

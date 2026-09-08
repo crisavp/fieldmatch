@@ -62,7 +62,8 @@ settings from the configuration. The full result is saved, including defaults.
 
 No spatial extrapolation or automatic nearest-*wet*-point filling is performed.
 Nearest-time matching may accept an observation just outside the first/last
-output time if within the declared tolerance; `dt` and `model_time` expose it.
+output time if within the declared tolerance; `time_offset_seconds` and
+`model_time` expose it.
 Use period/lead restrictions or exact matching to limit the comparison further.
 
 Direction thresholds detect numerical cancellation. A scientific exclusion for
@@ -97,40 +98,51 @@ are deduplicated; duplicate stable observation IDs after reading are errors.
 
 | Kind | Options |
 |---|---|
-| `altimeter_cmems` | `extra_vars` |
-| `altimeter_s3` | `extra_vars`, `retracker` (`sar`/`plrm`), `min_dist_coast_km`, `open_ocean_only` |
-| `altimeter_s6` | `extra_vars`, `retracker` (`mle`/`nr`), `band` (`ku`/`c`), `min_dist_coast_km`, `open_ocean_only` |
-| `sentinel1` | `extra_vars`, `qc` |
-| `ascat` | `extra_vars` |
+| `altimeter_cmems` | `extra_vars`, `retain_qc` |
+| `altimeter_s3` | `extra_vars`, `retain_qc`, `retracker` (`sar`/`plrm`), `min_dist_coast_km`, `open_ocean_only` |
+| `altimeter_s6` | `extra_vars`, `retain_qc`, `retracker` (`mle`/`nr`), `band` (`ku`/`c`), `min_dist_coast_km`, `open_ocean_only` |
+| `sentinel1` | `extra_vars`, `retain_qc`, `wind_quality`, `surface_mask` |
+| `ascat` | `extra_vars`, `retain_qc` |
 | `buoy_ispra` | required `lat`, `lon` |
 
-Defaults: 30 km exclusion where available, `open_ocean_only: true`, SAR `qc: true`.
+Defaults: 30 km exclusion where available, `open_ocean_only: true`, Sentinel-1
+`wind_quality: [acceptable, good]` and `surface_mask: [valid]`.
 CMEMS files have no coastal-distance guarantee; provenance reports no local
 coastal filter. Missing requested coastal/surface fields in supported readers
 are reported as unapplied. An unavailable filter is never implicitly satisfied.
-Sentinel-6 numerical retracking is Ku-only. `extra_vars` copies source columns
+Sentinel-6 numerical retracking is Ku-only. `retain_qc: true` preserves a
+canonical set of the most useful provider flags under `x_` names; it does not
+change the filter. `extra_vars` copies additional source columns
 under `x_`; inspect available axes with `fieldmatch vars`.
+`fieldmatch scan` also shows available retained-quality meanings and their counts
+without requiring `retain_qc: true`; retention controls pair-table columns only.
 
 ## Model dataset options
 
-Kinds: `grib` or `netcdf`. Options: `rename`, `coords`, `init`, `lead`,
-`lead_tol`, `overlap`. `coords` maps raw names to `time`, `lat`, `lon`;
+Kinds: `grib` or `netcdf`. Options: `rename`, `coords`, `init`, `init_cycle`,
+`lead`, `lead_tol`. `coords` maps raw names to `time`, `lat`, `lon`;
 `rename` maps raw variable names to chosen model names. `swh` is normalized to
 `hs` before applying `rename`, for compatibility with existing campaigns.
 
-- `init`: follow one initialization; valid times and actual leads are retained.
-- `lead`: exact lead or `lo-hi` window across initializations; overrides `init`.
+- `init`: select one exact initialization. The requested initialization must exist.
+- `init_cycle`: select a recurring UTC initialization in `HH:MM` form, such as
+  `"00:00"`. Use either `init` or `init_cycle`, not both.
+- `lead`: exact lead or `lo-hi` window, applied after initialization filtering.
 - `lead_tol`: default **0 hours**. Explicit positive values permit nearest-lead
   fallback only when there is no step inside the requested window. Actual leads
   are recorded. This is unrelated to observation-time tolerance.
-- `overlap`: default **error** for distinct forecasts valid at the same time.
-  Explicit `shortest_lead` chooses the freshest forecast and emits a warning.
-  It does not resolve conflicting finite values for the same forecast.
+
+For one forecast segment use, for example, `init: '2026-01-18T00:00'` with
+`lead: 12-36`. For the same lead window from every daily 00 UTC run, use
+`init_cycle: '00:00'` with `lead: 12-36`. Lead-window bounds are inclusive;
+if successive runs make the window overlap at a valid time, loading fails and
+the error identifies the colliding forecasts.
 
 Scalar and dimensional forecast steps must satisfy valid time = init + lead.
 Same-variable time partitions combine without silently overriding later values.
-Conflicting finite overlaps, units, grids or cross-variable provenance fail;
-complementary missing cells and identical repeated values may combine.
+Distinct forecasts at one valid time, conflicting finite overlaps, units, grids
+or cross-variable provenance fail. Complementary missing cells and identical
+repeated values may combine.
 Only rectilinear 1-D latitude/longitude grids are supported. Loading files does
 not reconcile incompatible grids. Explicit model-to-model regridding is available
 through the grid comparison workflow below.
@@ -142,13 +154,14 @@ settings directly under that variable and model source mappings into dataset
 
 ## Model-to-model groups
 
-A group may instead contain exactly `reference`, `model`, `time_basis`, and
-`variables`. Both datasets must be models. `reference` defines the target grid
+A group contains `reference`, `model`, and `variables`, plus
+`forecast_pairing` when both selected views are forecasts. Both datasets must be models. `reference` defines the target grid
 and the subtracted field; the result is candidate (`model`) minus reference.
-`time_basis` is required: `valid_time`, `same_init`, or `same_lead`.
-All three use exact shared valid times; the latter two additionally require
-matching finite initialization or lead coordinates. No implicit temporal
-interpolation or tolerance applies to grid comparisons.
+Each dataset's selectors define its forecast view and the comparison joins exact
+shared valid times. Two forecast views must explicitly select
+`forecast_pairing: same_forecast` (equal initialization and lead) or
+`forecast_pairing: same_valid_time` (different ages intentionally allowed).
+No implicit temporal interpolation or tolerance applies to grid comparisons.
 
 Grid variables accept only `space_method`, `missing_corners`,
 `direction_resultant_min`, and `wind_direction_min_speed`. Shared spatial

@@ -1,8 +1,32 @@
 # Installation and sharing
 
-Use the supplied source folder or wheel. The commands below do not assume a
-particular account, folder layout or pre-existing environment. Examples use a
-source folder named `fieldmatch`; substitute its actual path.
+Use the supplied source folder or wheel. Examples use a source folder named
+`fieldmatch`; substitute its actual path.
+
+## Simplest route: conda base
+
+For a collaborator who already uses conda and does not want to manage another
+environment, clone or unpack the repository and run this from its top-level
+folder:
+
+```bash
+bash install.sh --base
+```
+
+No activation is required. The command installs FieldMatch, plotting and all
+Python dependencies into conda's `base`, then runs `fieldmatch doctor` using
+that exact interpreter. It deliberately modifies `base`; use the new-environment
+route below instead if `base` contains sensitive or tightly pinned software.
+
+After a GitHub update, run from the same checkout:
+
+```bash
+git pull --ff-only
+bash install.sh --base
+```
+
+The second command is safe to repeat. A normal, non-editable installation is
+used so moving or deleting the checkout does not break the installed command.
 
 ## Existing Python environment
 
@@ -55,13 +79,17 @@ installation above; do not apply the entire environment file with `--prune`.
 On Bash systems, the optional helper performs the same steps:
 
 ```bash
+bash install.sh --base
+# OR
 bash install.sh --new fieldmatch
 # OR, after activating an existing Python environment:
 bash install.sh --existing
 ```
 
-The helper creates a new conda environment or uses the active Python. It never
-updates/prunes an existing conda environment. With no arguments it prints help.
+The helper uses conda base, creates a new conda environment, or uses the active
+Python according to the explicit option. It never applies an environment file
+to an existing environment and never prunes one. With no arguments it prints
+help.
 
 ## New pip/venv environment
 
@@ -79,14 +107,15 @@ On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` instead of
 `source`. Then use the same Python/pip commands. The Bash installer is optional;
 Python/pip commands are the cross-platform installation route.
 
-`cfgrib` needs a working ecCodes C library. `doctor` checks that the library loads
-and that the GRIB engine is available; it also performs a NetCDF round trip.
-If your pip/platform combination cannot supply ecCodes, install its native
-library for that platform, or use the conda route. In a conda environment:
+`cfgrib` needs a working ecCodes library. On supported pip platforms its
+`eccodes` dependency supplies the binary library; `doctor` verifies that it
+loads, that the GRIB engine is available, and that NetCDF works. If that wheel is
+not available for the collaborator's platform, install the native packages in
+the same conda environment and repeat the FieldMatch installation:
 
 ```bash
-conda install -c conda-forge cfgrib eccodes
-fieldmatch doctor
+conda install --name base -c conda-forge cfgrib eccodes
+bash install.sh --base
 ```
 
 Do not assume a successful Python import proves your provider files are readable;

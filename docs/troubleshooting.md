@@ -26,9 +26,9 @@ Names are your YAML keys, not built-in product aliases.
 | Missing fields or incompatible quantity/units | Check definitions and rename mappings. Renaming metadata is not unit conversion; energy and other mean periods are not interchangeable. |
 | Outside forecast coverage | Check initialization and valid times. Increasing tolerance is not a remedy for observations before the forecast starts. |
 | Time gaps exceed tolerance | Inspect cadence and actual observation times. A wider tolerance changes the scientific sample and phase offsets. |
-| No common grid times | Grid time matching is exact; same_init/same_lead add equality restrictions. Observation tolerance does not apply. |
+| No common grid times | Dataset selectors must produce exact shared valid times. Observation tolerance does not apply. |
 | Spatial values missing | Inspect position, domain and contributing corners. There is no wet-neighbour search or extrapolation. |
-| Conflicting forecast overlap | Select init/lead explicitly. shortest_lead is a deliberate freshest-forecast composite, not one forecast trajectory. |
+| Duplicate forecast valid time | Narrow `init`, `init_cycle`, or `lead`; one loaded forecast view must have unique valid times. |
 | Direction missing | Opposing directions or a nearly zero wind vector may make direction undefined. Do not replace it with zero degrees. |
 
 ## Saved results and plotting

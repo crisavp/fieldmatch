@@ -32,19 +32,23 @@ Reader implementation, accepted campaign options and source layout belong in
 one `ReaderSpec` in `src/fieldmatch/readers.py`:
 
 ```python
-def read_my_product(file, qc=True, extra_vars=None):
+def read_my_product(file, accepted_quality=("good",), extra_vars=None):
     with xr.open_dataset(file) as source:
+        quality_values, quality_names = _select_flag_meanings(
+            source["quality_flag"], accepted_quality, "accepted_quality")
+        keep = np.isin(source["quality_flag"].values, quality_values)
         values = {"hs": source["source_wave_height"].values}
+        values["hs"] = np.where(keep, values["hs"], np.nan)
         provenance = {
             "reader": "my_product",
             "hs_source": "source_wave_height",
-            "hs_filter": "quality_flag == 0" if qc else "none (qc disabled)",
+            "hs_filter": f"quality_flag in {quality_values} ({quality_names})",
             "lat_source": "latitude",
             "lon_source": "longitude",
             "time_source": "time",
             "land_mask": "none (not supplied by product)",
             "n_read": int(source.sizes["record"]),
-            "n_rejected_qual": 0,
+            "n_rejected_qual": int(np.count_nonzero(~keep)),
             "n_rejected_coastal": 0,
         }
         values, provenance = _collect_extras(
@@ -63,7 +67,7 @@ READERS = {
     # existing readers...
     "my_product": ReaderSpec(
         read_my_product,
-        frozenset({"qc", "extra_vars"}),
+        frozenset({"accepted_quality", "extra_vars"}),
         dim="record",
     ),
 }
@@ -80,8 +84,8 @@ dispatch and `fieldmatch vars` all derive their behavior from `READERS`.
 - Preserve integer flags and useful source metadata for `extra_vars`.
 - Do not reshape a variable from a different sampling axis into the reader's
   records. Refuse it with the source and required dimensions named.
-- Make quality filters configurable only where disabling them has a clear,
-  auditable meaning.
+- Prefer accepted flag meanings over numeric codes or a generic quality boolean;
+  validate them against the product metadata and record the effective values.
 - Missing flags must be recorded as unfiltered, not silently treated as good.
 
 ## Required tests

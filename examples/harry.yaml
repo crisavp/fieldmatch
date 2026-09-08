@@ -33,10 +33,9 @@ comparisons:
   analysis_era5:
     reference: analysis       # Defines the output grid and difference sign.
     model: era5               # Difference = ERA5 minus analysis.
-    time_basis: valid_time    # Analysis/reference consistency, not equal-lead skill.
     variables: {hs: {}}
   forecast18_models:
     reference: forecast18
     model: aifs18
-    time_basis: same_init     # Exact shared valid times AND equal initializations.
+    forecast_pairing: same_forecast
     variables: {hs: {}}

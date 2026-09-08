@@ -10,9 +10,14 @@ different wind timestamp cannot remove valid Hs observations.
 | `time`, `lat`, `lon` | Observation timestamp and position |
 | `hs`, `model_hs` (or another declared quantity) | Observed and matched model values |
 | `model_time` | Actual selected model valid time |
-| `dt` | Observation time minus model time, seconds |
-| `init`, `lead_hours` | Actual forecast provenance; analysis uses valid time and lead zero by convention |
+| `time_offset_seconds` | Observation time minus model valid time, seconds |
+| `init`, `lead_hours` | Actual forecast provenance, present only for forecast datasets |
 | `x_*` | Explicitly requested extra observation variables |
+
+With dataset option `retain_qc: true`, the principal provider quality fields
+also use `x_*` names and retain their flag metadata. They are context variables,
+not additional quantities scored automatically. Apply and document an explicit
+mask before calling `stats_table` for a QC sensitivity result.
 
 Only finite pairs are retained. Counts separate invalid time/position, missing
 observation values, time rejection, and missing/out-of-grid/undefined model
@@ -26,12 +31,16 @@ formatting (`%.17g`). NetCDF is available with `--format netcdf` or `both`.
 Strings are not compressed as NetCDF variable-length strings. Numeric variables
 are compressed. The formats derive from exactly the same pair Dataset.
 
-Both use `<campaign>_<obs>_x_<model>_<variable>`. Named comparisons append their
-name. Explicit lead views append a lead-window suffix. Entire stems, including
-periods in campaign names, are retained. Repeating the same comparison replaces
-that result and its manifest; use different named comparisons to retain policy
-sensitivity experiments. Temporary files and a running/complete/failed manifest
-prevent a failed rerun from masquerading as a successful current result.
+Named comparisons use `<comparison>__<variable>`, for example
+`ba04_operational__wave_dir.nc`. The comparison key already identifies both
+datasets, while the manifest records the campaign and complete configuration.
+Direct unnamed collocations use `<obs>__<model>__<variable>` and append an
+explicit lead-window suffix when applicable. The campaign output directory is
+therefore the campaign namespace; use a separate output directory for each
+study. Repeating the same comparison replaces that result and its manifest; use
+different named comparisons to retain policy sensitivity experiments. Temporary
+files and a running/complete/failed manifest prevent a failed rerun from
+masquerading as a successful current result.
 
 ## Why are there JSON files?
 
@@ -56,7 +65,7 @@ are readable or suitable; use `scan` and review the actual run diagnostics too.
 `.fieldmatch/<stem>.manifest.json` saves the effective comparison, including defaults:
 
 - source/quantity mapping, units, direction conventions and reader/QC provenance;
-- matching policy, initialization/lead/overlap selection, actual matched leads;
+- matching policy, initialization/cycle/lead selection, actual matched leads;
 - input file paths, sizes and content hashes;
 - FieldMatch version and implementation source hashes;
 - exact region/period, accepted/rejected counts and pair metadata;
@@ -92,8 +101,8 @@ threshold exposure and physical interpretation belong to the analysis script.
 - In Python, pass `variable='hs'`; `variables=['hs']` is retained as a single-item
   spelling. Multiple variables must be separate calls. No shared variable is an
   error, not a request to sample every model field.
-- Nearest-lead fallback defaults to zero tolerance; shortest-lead overlap
-  selection is opt-in.
+- Nearest-lead fallback defaults to zero tolerance. Distinct forecasts at one
+  valid time are rejected; narrow the dataset selectors.
 - Scalar-step valid times, conflicting file partitions, undefined directions
   and exact wet grid nodes are corrected. Expect intentional changes in those
   formerly incorrect cases.
@@ -103,16 +112,17 @@ threshold exposure and physical interpretation belong to the analysis script.
 
 ## Grid comparisons (0.3)
 
-Grid NetCDF contains `reference`, `candidate`, `difference`, `valid` (0/1) on
-(time, lat, lon), plus per-time finite counts and available reference/candidate
-initializations and leads. Both fields are masked to the same finite cells at
-each time. Differences are candidate minus reference, wrapped to [-180,180)
-for directions. `n_reference` and `n_candidate` are counts before common masking;
-`n_common` counts accepted cells. A time with no common cells remains present,
-with zero count, NaN fields/statistics, and zero valid area fraction.
+Grid NetCDF has only three scientific data variables on `(time, lat, lon)`:
+`reference`, `candidate`, and `difference`. The first two preserve each source's
+independent availability. `difference` exists only where both are finite and is
+candidate minus reference, wrapped to [-180,180) for directions. Forecast
+initialization and lead are retained as compact metadata and expanded only when
+`forecast_table(result)` is called; they do not clutter the scientific fields or
+coordinates. Valid-time-only datasets omit them. The common mask and counts are derived when
+statistics or comparison panels are made, rather than stored as redundant fields.
 
-Grid CSV contains per-time spherical-area-weighted mean and RMS differences,
-valid area fraction and common-cell count. It cannot reconstruct field plots;
+Grid CSV contains `time` plus per-time spherical-area-weighted mean and RMS
+differences, valid area fraction, and common-cell count. It cannot reconstruct field plots;
 use the NetCDF. Both formats have the same hidden provenance directory convention with
 input hashes, effective settings, source grids and source-code hashes.
 Use `fieldmatch.results.open_result` to validate and load portable NetCDF or

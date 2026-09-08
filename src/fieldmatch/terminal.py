@@ -82,12 +82,13 @@ def result_info(result, *, details=False):
             for key in ('rows', 'times', 'common_cells'):
                 if key in record:
                     summary[key] = record[key]
-            for key in ('period', 'region', 'time_basis', 'target_grid', 'matching', 'model_options', 'reader_options'):
+            for key in ('period', 'region', 'target_grid', 'matching', 'model_options', 'reader_options'):
                 if key in effective:
                     summary[key] = effective[key]
             provenance = effective.get('reader_provenance', {})
             screening = {k:v for k,v in provenance.items()
-                         if k.startswith('n_') or k.endswith('_filter') or k == 'land_mask'}
+                         if (k.startswith('n_') or k.endswith('_filter')
+                             or k in {'land_mask', 'retained_qc'})}
             if screening:
                 summary['reader screening'] = screening
         console.print(Panel(record_table(summary), title='Saved figure' if figure else 'Saved comparison',

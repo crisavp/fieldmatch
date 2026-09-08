@@ -8,7 +8,7 @@ Start with `fieldmatch --help`. Each command also accepts `--help`, for example
 | `config-example --output study.yaml` | Write the fully commented configuration catalogue, including every built-in reader. |
 | `info RESULT` | Validate and explain a saved comparison or PNG; `--details` shows the complete provenance. |
 | `doctor` | Check installation and data-reading engines. |
-| `scan CAMPAIGN` | Inventory source files, coverage and available quantities. |
+| `scan CAMPAIGN` | Inventory source files, forecast metadata/selection, coverage, quantities, and principal quality flags with values/counts. |
 | `vars CAMPAIGN DATASET` | Examine standardized variables and source fields for one dataset key. `--all` includes nonstandard fields and alternative axes/cadences. |
 | `run CAMPAIGN --describe` | Preview every declared comparison's resolved settings. Does not compute comparisons or write results. |
 | `run CAMPAIGN` | Execute all named comparisons and variables in the YAML. |
@@ -18,6 +18,18 @@ Start with `fieldmatch --help`. Each command also accepts `--help`, for example
 
 The usual study needs scan, run and a plotting script. Other commands remain useful
 for diagnosis, individual experiments and existing scripts; none are obsolete.
+
+For models, scan labels the raw time representation as `forecast
+(initialization + lead)`, `valid-time only`, or ambiguous. Forecast reports list
+the available initialization range and UTC cycles, lead range/increments, raw
+valid-time coverage, configured `init`/`init_cycle`/`lead` selection, and the
+loaded valid-time coverage. This classification comes from file metadata;
+filenames are not interpreted as forecast provenance.
+
+For observations, scan lists the principal provider quality/context fields,
+their named values and counts after dataset screening, the applied reader
+filters, and whether those fields will be retained in pair output. It performs
+this inventory even when `retain_qc` is false.
 
 ## Output formats
 
@@ -38,8 +50,8 @@ one-off choices; they are recorded in the result manifest:
 - `--lead 24` or `--lead 12-35`: forecast hours since initialization to select.
 - `--lead-tol`: allowed fallback distance in hours when the requested lead is absent;
   zero means no fallback. This is different from observation-time tolerance.
-- `--overlap error` or `--overlap shortest_lead`: reject multiple forecasts for one
-  valid time, or explicitly choose the shortest available forecast lead.
+- Distinct forecasts producing the same valid time are rejected; narrow the
+  dataset's initialization or lead selectors to obtain a unique forecast view.
 - `--obs-variable` and `--model-variable`: source-field names for one quantity.
   Dataset mappings and per-variable YAML declarations are clearer for larger studies.
 

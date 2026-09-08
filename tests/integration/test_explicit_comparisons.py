@@ -7,8 +7,9 @@ import yaml
 from typer.testing import CliRunner
 from fieldmatch.cli import app, _open_pairs
 from fieldmatch.campaign import load_campaign, validate_output_manifest
-from fieldmatch.comparison import resolve_comparison, run_comparisons
+from fieldmatch.comparison import resolve_comparison, result_stem, run_comparisons
 from fieldmatch.common import common_sample
+from fieldmatch.results import open_campaign_results
 
 
 def inputs(tmp_path):
@@ -39,7 +40,7 @@ def test_batch_does_not_change_single_quantity_and_saves_complete_manifest(tmp_p
     saved=hs.copy(deep=True)
     again,errors=run_comparisons(camp,specs[:1],emit=lambda _:None)
     xr.testing.assert_equal(saved.hs,_open_pairs(again[0]['outputs']['csv']).hs)
-    assert 'test.v2_buoy_x_model_hs.csv'==results[0]['outputs']['csv'].name
+    assert 'buoy__model__hs.csv'==results[0]['outputs']['csv'].name
     manifest=json.loads((results[0]['outputs']['csv'].parent/'.fieldmatch'/(results[0]['outputs']['csv'].stem+'.manifest.json')).read_text())
     assert manifest['effective']['matching']['tolerance_minutes']==60
     assert manifest['effective']['reader_options']['lat']==.5
@@ -51,15 +52,36 @@ def test_batch_does_not_change_single_quantity_and_saves_complete_manifest(tmp_p
 
 def test_named_comparison_and_cli_override_precedence(tmp_path):
     p=inputs(tmp_path);camp=load_campaign(p)
+    assert result_stem(camp, resolve_comparison(
+        camp, comparison='exact')) == camp.outdir/'exact__hs'
+    assert result_stem(camp, resolve_comparison(
+        camp, 'buoy', 'model', 'hs')) == camp.outdir/'buoy__model__hs'
     assert resolve_comparison(camp,comparison='exact')['matching']['tolerance_minutes']==0
     assert resolve_comparison(camp,comparison='exact',matching={'tolerance_minutes':30})['matching']['tolerance_minutes']==30
     runner=CliRunner();r=runner.invoke(app,['compare',str(p),'exact'])
     assert r.exit_code==0,r.output
-    result=tmp_path/'fieldmatch_out/test.v2_buoy_x_model_hs_exact.csv'
+    result=tmp_path/'fieldmatch_out/exact__hs.csv'
     assert len(pd.read_csv(result))==2
     r=runner.invoke(app,['compare',str(p),'exact','--describe'])
     assert r.exit_code==0,r.output
     assert 'tolerance minutes' in r.output and 'Preview only' in r.output
+
+
+def test_result_discovery_prefers_concise_name_during_migration(tmp_path):
+    p = inputs(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(app, ['compare', str(p), 'exact', '--format', 'both'])
+    assert result.exit_code == 0, result.output
+    hidden = tmp_path/'fieldmatch_out/.fieldmatch'
+    current = json.loads((hidden/'exact__hs.manifest.json').read_text())
+    current['outputs'] = {
+        key: str(tmp_path/'fieldmatch_out'/f'test.v2_buoy_x_model_hs_exact{suffix}')
+        for key, suffix in [('csv', '.csv'), ('netcdf', '.nc')]
+    }
+    (hidden/'test.v2_buoy_x_model_hs_exact.manifest.json').write_text(
+        json.dumps(current))
+    loaded = open_campaign_results(load_campaign(p))
+    assert loaded[('exact', 'hs')].attrs['result_source'].endswith('exact__hs.nc')
 
 
 def test_explicit_cli_zero_and_missing_variable(tmp_path):
@@ -67,7 +89,7 @@ def test_explicit_cli_zero_and_missing_variable(tmp_path):
     assert runner.invoke(app,['collocate',str(p),'buoy','model']).exit_code!=0
     r=runner.invoke(app,['collocate',str(p),'buoy','model','-v','hs','--tol-minutes','0'])
     assert r.exit_code==0,r.output
-    assert len(pd.read_csv(tmp_path/'fieldmatch_out/test.v2_buoy_x_model_hs.csv'))==2
+    assert len(pd.read_csv(tmp_path/'fieldmatch_out/buoy__model__hs.csv'))==2
 
 
 def test_tampered_table_and_effective_spec_are_detected(tmp_path):
@@ -112,10 +134,10 @@ def test_grouped_variables_have_independent_rules_and_samples(tmp_path):
         resolve_comparison(camp,comparison='group')
     result=CliRunner().invoke(app,['compare',str(p),'group','--format','both'])
     assert result.exit_code==0,result.output
-    hs=_open_pairs(tmp_path/'fieldmatch_out/test.v2_buoy_x_model_hs_group.nc')
-    wind=_open_pairs(tmp_path/'fieldmatch_out/test.v2_buoy_x_model_wind_speed_group.nc')
+    hs=_open_pairs(tmp_path/'fieldmatch_out/group__hs.nc')
+    wind=_open_pairs(tmp_path/'fieldmatch_out/group__wind_speed.nc')
     assert hs.sizes['obs']==3 and float(hs.hs.max())==8.88
-    assert wind.sizes['obs']==1 and np.all(wind.dt==0)
+    assert wind.sizes['obs']==1 and np.all(wind.time_offset_seconds==0)
     assert json.loads(wind.attrs['effective_comparison'])['matching']['space_method']=='nearest'
 
 

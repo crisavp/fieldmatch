@@ -27,6 +27,10 @@ def open_result(path):
         for name in ('time','init','model_time'):
             if name in frame:frame[name]=pd.to_datetime(frame[name],errors='raise')
         ds=xr.Dataset({c:('obs',frame[c].to_numpy()) for c in frame})
+        auxiliary = [name for name in ('time','lat','lon','obs_id','source_file','record_index','model_time',
+                     'time_offset_seconds','init','lead_hours') if name in ds]
+        if auxiliary:
+            ds = ds.set_coords(auxiliary)
         ds.attrs.update(record.get('pair_attributes',{}))
         v=ds.attrs.get('variable')
         for name in (v,f'model_{v}'):
@@ -52,13 +56,27 @@ def open_campaign_results(campaign):
         if effective.get('campaign') != campaign.name:
             continue
         key = (effective.get('comparison'), effective.get('variable'))
-        if key in records:
-            raise ValueError(f'Multiple result manifests for {key}; use a separate output folder per study.')
-        records[key] = record
+        records.setdefault(key, []).append(record)
     loaded = {}
     for name, declaration in campaign.comparisons.items():
         for variable in declaration['variables']:
-            record = records.get((name, variable))
+            candidates = records.get((name, variable), [])
+            # During migration an old verbose result and its concise replacement
+            # may coexist. Prefer the new stable stem without deleting history.
+            expected_stem = f'{name}__{variable}'
+            preferred = [record for record in candidates
+                         if any(Path(path).stem == expected_stem
+                                for path in record.get('outputs', {}).values())]
+            if len(preferred) == 1:
+                record = preferred[0]
+            elif len(candidates) == 1:
+                record = candidates[0]
+            elif len(preferred) > 1 or len(candidates) > 1:
+                raise ValueError(
+                    f'Multiple result manifests for {(name, variable)}; '
+                    'use a separate output folder per study.')
+            else:
+                record = None
             if record is None or record['status'] != 'complete':
                 raise ValueError(f'No complete {name}/{variable} result. Run comparisons first.')
             # Validate against the currently selected campaign too, not just the

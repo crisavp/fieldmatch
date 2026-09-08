@@ -32,7 +32,7 @@ def doctor():
 
 @app.command()
 def scan(campaign: Path = typer.Argument(..., exists=True, dir_okay=False, help="Campaign YAML containing datasets and comparison settings.")):
-    """Inventory the files and coverage declared by a campaign YAML."""
+    """Inventory files, raw time structure, selections and loaded coverage."""
     from .campaign import load_campaign
     from .scan import format_report, scan_campaign
     camp = load_campaign(campaign)
@@ -100,7 +100,6 @@ def collocate(
     tol_minutes: Optional[float] = typer.Option(None, help="Override nearest-time tolerance in minutes; 0 requires exact times. Omit to use YAML/defaults."),
     lead: Optional[str] = typer.Option(None, help="Select forecast hours since initialization, e.g. 24 or 12-35; overrides YAML lead selection."),
     lead_tol: Optional[float] = typer.Option(None, help="Maximum fallback distance in forecast hours when the requested lead is absent. Default 0: no fallback."),
-    overlap: Optional[str] = typer.Option(None, help="Resolve multiple forecasts for one valid time: error (default), or explicitly choose shortest_lead."),
     obs_variable: Optional[str] = typer.Option(None, help="Observation source column for one --variable; use YAML mappings for multiple quantities."),
     model_variable: Optional[str] = typer.Option(None, help="Model source field for one --variable; otherwise use the dataset mapping."),
 ):
@@ -115,7 +114,7 @@ def collocate(
         raise typer.BadParameter("source overrides require one variable; use named comparisons for different mappings")
     camp=load_campaign(campaign)
     matching={} if tol_minutes is None else {"tolerance_minutes":tol_minutes}
-    opts={k:v for k,v in dict(lead=lead,lead_tol=lead_tol,overlap=overlap).items() if v is not None}
+    opts={k:v for k,v in dict(lead=lead,lead_tol=lead_tol).items() if v is not None}
     try:
         specs=[resolve_comparison(camp,obs,model,v,matching=matching,model_options=opts,
                     obs_variable=obs_variable,model_variable=model_variable) for v in variables]
@@ -187,6 +186,10 @@ def _open_pairs(path):
         if name in frame:
             frame[name] = pd.to_datetime(frame[name], errors="raise")
     ds = xr.Dataset({column: ("obs", frame[column].to_numpy()) for column in frame.columns})
+    auxiliary = [name for name in ('time','lat','lon','obs_id','source_file','record_index','model_time',
+                 'time_offset_seconds','init','lead_hours') if name in ds]
+    if auxiliary:
+        ds = ds.set_coords(auxiliary)
     from .campaign import manifest_path
     import json
     manifest = manifest_path(path.with_suffix(""))

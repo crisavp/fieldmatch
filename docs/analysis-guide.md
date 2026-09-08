@@ -34,8 +34,11 @@ fieldmatch run /path/to/study/harry.yaml --describe
 fieldmatch vars /path/to/study/harry.yaml analysis
 ```
 
-Scan inventories data; describe prints all effective comparison settings without
-running comparisons.
+Scan inventories data, including whether model files carry selectable forecast
+initialization/lead metadata or valid times only. For forecasts it shows raw
+initialization cycles and leads, the configured dataset selection, and the
+resulting loaded valid-time coverage. Describe prints all effective comparison
+settings without running comparisons.
 
 Names such as `analysis` and `ba08` are YAML keys, not built-in aliases. Check units,
 all reported time cadences, forecast initialization and sensor coordinates. A zero
@@ -71,11 +74,12 @@ comparisons:
 Each quantity has independent accepted rows and files. Model source names are
 mapped once with `rename`, e.g. `{pp1d: tp, mwd: wave_dir}` in the dataset.
 
-Grid groups use `reference`, `model`, `time_basis` and `variables`. The reference
+Grid groups use `reference`, `model` and `variables`. The reference
 sets the grid and the subtracted field: **difference = model − reference**.
 Both output fields use the common finite mask at each exact shared time.
-`same_init` additionally requires equal initializations; `same_lead` requires equal
-finite leads. `valid_time` permits different initializations/leads and records them.
+Dataset `init`, `init_cycle` and `lead` selectors define each forecast view. Grid
+comparison joins those views at exact common valid times and records both sides'
+actual initializations and leads.
 Observation-time tolerance never applies to a grid comparison.
 
 Inspect definitions instead of forcing names to match. ECMWF energy period is
@@ -144,11 +148,12 @@ Inspect `tables`, `pairs`, `grids`, `analysis` and `campaign`, or add cells belo
 ```python
 print(tables.keys())
 station = pairs[('ba08', 'hs')]['buoy_analysis']
-print(station[['time', 'model_time', 'dt', 'hs', 'model_hs']].to_dataframe().head())
+print(station[['time', 'model_time', 'time_offset_seconds', 'hs', 'model_hs']].to_dataframe().head())
 ```
 
 `time` is observation time; `model_time` is sampled model time;
-`dt = observation − model time` in seconds. Positive dt means an earlier model.
+`time_offset_seconds = observation − model valid time`. A positive value means
+the selected model field is earlier than the observation.
 
 ## 7. Extend the scientific analysis
 

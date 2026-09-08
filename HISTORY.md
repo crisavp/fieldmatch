@@ -1,9 +1,27 @@
 ## 0.5.0
 
+- Add a one-command `install.sh --base` route for collaborators who already use
+  conda base, including an installation-time doctor check and repeatable update
+  instructions.
+- Result names now use `<comparison>__<variable>` for named comparisons and
+  `<obs>__<model>__<variable>` for direct collocations, removing campaign and
+  dataset text already represented by the output directory and manifest.
+- Forecast `init`/`init_cycle` and `lead` are independent dataset filters;
+  duplicate valid times are rejected and grid comparisons join the resulting
+  views directly at exact common valid times without a separate time basis.
+- Scan distinguishes selectable forecast initialization/lead metadata from
+  valid-time-only models and shows both raw availability and the selected view.
 - Colored Rich panels for configuration previews; info presents saved provenance.
 - New result and figure records live in .fieldmatch subfolders, with legacy sidecar reads retained.
 - Installed config-example command provides a commented catalogue covering every reader and model option.
 - Reader reference distinguishes editable settings from fixed processing rules.
+- Observation datasets can opt into `retain_qc: true` to preserve canonical
+  provider quality, surface, rain/ice and coastal context for explicit
+  statistics-stage sensitivity checks; scan distinguishes saved evidence from
+  applied filters and reports bad flags separately from newly masked values.
+- Sentinel-1 replaces the ambiguous `qc` switch with explicit accepted
+  `wind_quality` and `surface_mask` meanings. Scan inventories available quality
+  meanings and counts independently of `retain_qc`.
 
 ## 0.4.2
 

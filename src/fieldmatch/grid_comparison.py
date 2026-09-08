@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 import numpy as np
-from .grids import compare_grids, grid_stats, TIME_BASES
+from .grids import compare_grids, grid_stats
 from .models import open_model
 from .campaign import MODEL_KINDS, _file_sha256, execution_digest, write_run_manifest, json_default
 from .quantities import definition
@@ -21,28 +21,28 @@ def resolve_grid_comparison(camp, name, variable):
     options = {}
     for label,key in [('reference','reference'),('candidate','model')]:
         options[label] = {**MODEL_DEFAULTS, **camp.get(declared[key]).options}
-        if options[label]['lead'] is not None:
-            options[label]['init'] = None
-    return dict(schema_version=3, kind='grid', campaign=camp.name, comparison=name,
+    return dict(schema_version=5, kind='grid', campaign=camp.name, comparison=name,
         variable=variable, quantity=definition(variable), reference_dataset=declared['reference'],
         model_dataset=declared['model'], target_grid=declared['reference'],
-        time_basis=declared['time_basis'], time_method='exact', matching=rules,
+        time_method='exact', matching=rules,
         model_options=options, mask_policy='common_finite_per_time',
+        forecast_pairing=declared.get('forecast_pairing'),
         difference_sign='candidate minus reference', region=camp.bbox,
         period=[str(t) for t in camp.period])
 
 
 def run_grid_comparison(camp, spec, *, formats, cache, identities, emit):
-    """NetCDF holds fields and mask; CSV holds per-time area-weighted differences."""
+    """NetCDF holds fields; CSV holds per-time area-weighted differences."""
     from . import __version__
     if not formats or set(formats)-{'csv','netcdf'}:
         raise ValueError('formats must contain csv and/or netcdf')
     variable=spec['variable'];ref=spec['reference_dataset'];model=spec['model_dataset']
-    stem=camp.outdir/f'{camp.name}_{ref}_x_{model}_{variable}_{spec["comparison"]}'
+    from .comparison import result_stem
+    stem=result_stem(camp, spec)
     effective={**spec, 'fieldmatch_version':__version__,
         'implementation_sha256':{p.name:_file_sha256(p) for p in Path(__file__).parent.glob('*.py')}}
     write_run_manifest(stem,camp,ref,model,'running',effective=effective,comparison_kind='grid')
-    emit(f'{model} minus {ref}: {variable}; grid={ref}; exact times; basis={spec["time_basis"]}')
+    emit(f'{model} minus {ref}: {variable}; grid={ref}; exact common valid times')
     emit(f'matching: {json.dumps(spec["matching"], sort_keys=True)}')
     try:
         datasets=[];effective['inputs']={};effective['source_grids']={}
@@ -63,7 +63,8 @@ def run_grid_comparison(camp, spec, *, formats, cache, identities, emit):
             effective['source_grids'][label]={a:ds[a].values.tolist() for a in ['lat','lon']}
         rules=spec['matching']
         pair=compare_grids(*datasets,variable,space_method=rules['space_method'],
-            time_basis=spec['time_basis'],reference_name=ref,candidate_name=model,
+            reference_name=ref,candidate_name=model,
+            forecast_pairing=spec.get('forecast_pairing'),
             direction_resultant_min=rules['direction_resultant_min'],
             wind_direction_min_speed=rules['wind_direction_min_speed'])
         effective['source_attributes']=json.loads(pair.attrs['source_attributes'])
@@ -77,17 +78,19 @@ def run_grid_comparison(camp, spec, *, formats, cache, identities, emit):
             temp=target.with_name('.'+target.name+'.tmp')
             try:
                 if fmt=='netcdf':
-                    pair.to_netcdf(temp,encoding={v:dict(zlib=True,complevel=4) for v in ('reference','candidate','difference','valid')})
+                    pair.to_netcdf(temp,encoding={v:dict(zlib=True,complevel=4)
+                                                  for v in ('reference','candidate','difference')})
                 else:
                     grid_stats(pair).to_dataframe().to_csv(temp,float_format='%.17g')
                 temp.replace(target)
             finally:
                 temp.unlink(missing_ok=True)
             outputs[fmt]=target
+        common_cells = int((np.isfinite(pair.reference) & np.isfinite(pair.candidate)).sum())
         write_run_manifest(stem,camp,ref,model,'complete',effective=effective,comparison_kind='grid',
-            reference_dataset=ref,times=pair.sizes['time'],common_cells=int(pair.valid.sum()),
+            reference_dataset=ref,times=pair.sizes['time'],common_cells=common_cells,
             outputs={k:str(p) for k,p in outputs.items()},output_sha256={k:_file_sha256(p) for k,p in outputs.items()})
-        emit(f'{variable}: {pair.sizes["time"]} times; {int(pair.valid.sum())} common time/cell pairs -> {outputs}')
+        emit(f'{variable}: {pair.sizes["time"]} times; {common_cells} common time/cell pairs -> {outputs}')
         return dict(variable=variable,outputs=outputs,times=pair.sizes['time']),None
     except Exception as exc:
         write_run_manifest(stem,camp,ref,model,'failed',effective=effective,comparison_kind='grid',reason=str(exc))

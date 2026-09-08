@@ -29,7 +29,7 @@ def study(tmp_path):
                       a=dict(kind='netcdf',path='a.nc'),b=dict(kind='netcdf',path='b.nc')),
         comparisons=dict(ba=dict(obs='buoy',model='a',variables=dict(hs={})),
                          bb=dict(obs='buoy',model='b',variables=dict(hs={})),
-                         ab=dict(reference='a',model='b',time_basis='valid_time',variables=dict(hs={}))))
+                         ab=dict(reference='a',model='b',variables=dict(hs={}))))
     (home/'harry.yaml').write_text(yaml.safe_dump(config));return home
 
 

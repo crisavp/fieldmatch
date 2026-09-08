@@ -13,7 +13,7 @@ from .quantities import definition
 MATCHING_DEFAULTS = dict(time_method='nearest', tolerance_minutes=30., time_tie='earlier',
     space_method='bilinear', missing_corners='reject_nonzero_weight',
     direction_resultant_min=1e-10, wind_direction_min_speed=1e-10)
-MODEL_DEFAULTS = dict(init=None, lead=None, lead_tol=0., overlap='error')
+MODEL_DEFAULTS = dict(init=None, init_cycle=None, lead=None, lead_tol=0.)
 SAFE_NAME = re.compile(r'[A-Za-z0-9_.-]+')
 
 
@@ -35,20 +35,22 @@ def validate_matching(options):
 def validate_comparisons(comparisons, datasets):
     if not isinstance(comparisons, dict):
         raise ValueError('comparisons must be a mapping')
-    from .grid_comparison import GRID_OPTIONS, TIME_BASES
+    from .grid_comparison import GRID_OPTIONS
     for name, spec in comparisons.items():
         if not SAFE_NAME.fullmatch(str(name)) or not isinstance(spec, dict):
             raise ValueError(f'invalid comparison {name!r}')
         grid = 'reference' in spec
-        required = {'reference','model','time_basis','variables'} if grid else {'obs','model','variables'}
-        if set(spec) != required:
-            raise ValueError(f'comparison {name}: requires exactly {sorted(required)}')
+        required = {'reference','model','variables'} if grid else {'obs','model','variables'}
+        optional = {'forecast_pairing'} if grid else set()
+        if not required <= set(spec) or set(spec) - required - optional:
+            raise ValueError(f'comparison {name}: requires {sorted(required)}'
+                             + (" and optionally forecast_pairing" if grid else ""))
+        if grid and spec.get('forecast_pairing') not in {None, 'same_forecast', 'same_valid_time'}:
+            raise ValueError("forecast_pairing must be same_forecast or same_valid_time")
         for key in (['reference','model'] if grid else ['obs','model']):
             role = 'model' if grid else key
             if spec[key] not in datasets or datasets[spec[key]].role != role:
                 raise ValueError(f'comparison {name}: {key} must name a {role} dataset')
-        if grid and spec['time_basis'] not in TIME_BASES:
-            raise ValueError(f'comparison {name}: time_basis must be one of {sorted(TIME_BASES)}')
         variables=spec['variables']
         if not isinstance(variables, dict) or not variables:
             raise ValueError(f'comparison {name}: variables must be a nonempty mapping')
@@ -91,24 +93,41 @@ def resolve_comparison(camp, obs=None, model=None, variable=None, *, comparison=
     for key in ['tolerance_minutes','direction_resultant_min','wind_direction_min_speed']:
         rules[key]=float(rules[key])
     opts={**MODEL_DEFAULTS, **md.options, **(model_options or {})}
-    if opts.get('lead') is not None:
-        opts['init']=None
+    if opts.get('init') is not None and opts.get('init_cycle') is not None:
+        raise ValueError('select either init or init_cycle, not both')
     if not np.isfinite(opts['lead_tol']) or opts['lead_tol']<0:
         raise ValueError('lead_tol must be finite and nonnegative')
-    if opts['overlap'] not in {'error','shortest_lead'}:
-        raise ValueError('overlap must be error or shortest_lead')
     reader_options={k:p.default for k,p in inspect.signature(READERS[od.kind].reader).parameters.items()
                     if k in READERS[od.kind].options and p.default is not inspect.Parameter.empty}
     reader_options.update(od.options)
     oname=obs_variable or variable
     mname=model_variable
     sources=['u10','v10'] if mname is None and variable in {'wind_speed','wind_dir'} else [mname or variable]
-    return dict(schema_version=2, campaign=camp.name, comparison=comparison,
+    return dict(schema_version=3, campaign=camp.name, comparison=comparison,
                 obs_dataset=obs, model_dataset=model, variable=variable,
                 quantity=definition(variable), obs_variable=oname, model_variable=mname,
                 model_sources=sources, reader_kind=od.kind, reader_options=reader_options,
                 model_engine=MODEL_KINDS[md.kind], model_options=opts, matching=rules,
                 region=camp.bbox, period=[str(t) for t in camp.period])
+
+
+def result_stem(camp, spec):
+    """Return the stable, concise output stem for one resolved quantity.
+
+    A named comparison already identifies both datasets, while a direct
+    collocation has no such name and therefore spells out its two dataset keys.
+    The manifest retains the campaign and complete scientific specification.
+    """
+    variable = spec["variable"]
+    if spec.get("comparison"):
+        name = f'{spec["comparison"]}__{variable}'
+    else:
+        name = f'{spec["obs_dataset"]}__{spec["model_dataset"]}__{variable}'
+        if spec["model_options"].get("lead") is not None:
+            from .models import parse_lead
+            lo, hi = parse_lead(spec["model_options"]["lead"])
+            name += f'__lead{lo:g}-{hi:g}h'
+    return camp.outdir / name
 
 
 def run_comparisons(campaign, specs, *, formats=('csv',), emit=print):
@@ -118,9 +137,31 @@ def run_comparisons(campaign, specs, *, formats=('csv',), emit=print):
     A failed quantity invalidates its own manifest, not another quantity's table.
     """
     from .campaign import (load_campaign, crop_obs, combine_provenance, _file_sha256,
-                           write_run_manifest, execution_digest, json_default)
+                           write_run_manifest, execution_digest, json_default,
+                           manifest_path)
     from . import __version__
     camp=load_campaign(campaign) if isinstance(campaign,(str,Path)) else campaign
+    specs = list(specs)
+    planned = {}
+    for spec in specs:
+        stem = result_stem(camp, spec)
+        identity = (camp.name, spec.get('comparison'), spec['variable'])
+        if stem in planned:
+            raise ValueError(f'output-name collision at {stem}: {planned[stem]} and {identity}')
+        planned[stem] = identity
+        existing = manifest_path(stem)
+        if existing.exists():
+            try:
+                old = json.loads(existing.read_text())
+                old_effective = old.get('effective', {})
+                old_identity = (old.get('campaign'), old_effective.get('comparison'),
+                                old_effective.get('variable'))
+                if old_identity != identity:
+                    raise ValueError(
+                        f'{stem} already belongs to {old_identity}; use a separate '
+                        'output folder or a different comparison name')
+            except json.JSONDecodeError:
+                pass
     implementation = {p.name:_file_sha256(p) for p in Path(__file__).parent.glob("*.py")}
     clouds, models, identities, results, failures = {}, {}, {}, [], []
     for spec in specs:
@@ -132,14 +173,7 @@ def run_comparisons(campaign, specs, *, formats=('csv',), emit=print):
             if failure: failures.append(failure)
             continue
         variable=spec['variable']; od=camp.get(spec['obs_dataset']); md=camp.get(spec['model_dataset'])
-        stem=camp.outdir/f"{camp.name}_{od.name}_x_{md.name}_{variable}"
-        # Distinguish named experiments and forecast views; settings remain fully in the manifest.
-        if spec['comparison']:
-            stem=Path(f"{stem}_{spec['comparison']}")
-        elif spec['model_options']['lead'] is not None:
-            from .models import parse_lead
-            lo,hi=parse_lead(spec['model_options']['lead'])
-            stem=Path(f'{stem}_lead{lo:g}-{hi:g}h')
+        stem=result_stem(camp, spec)
         effective={**spec, 'fieldmatch_version':__version__, 'implementation_sha256':implementation}
         emit(f"{od.name} x {md.name}: {variable}; observation={spec['obs_variable']}; "
              f"model sources={', '.join(spec['model_sources'])}")
@@ -193,7 +227,8 @@ def run_comparisons(campaign, specs, *, formats=('csv',), emit=print):
             effective['reader_provenance']=dict(cloud.attrs)
             effective['observation_attributes']=dict(pair[variable].attrs)
             effective['model_attributes']={s:dict(mod[s].attrs) for s in spec['model_sources']}
-            effective['actual_lead_hours']=np.unique(pair.lead_hours.values).tolist()
+            if 'lead_hours' in pair.coords:
+                effective['actual_lead_hours']=np.unique(pair.lead_hours.values).tolist()
             pair.attrs['effective_comparison']=json.dumps(effective,sort_keys=True,default=json_default)
             outputs=write_pairs(pair,stem,formats)
             for fmt,ext in [('csv','.csv'),('netcdf','.nc')]:
